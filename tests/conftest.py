@@ -1,0 +1,101 @@
+import pytest
+import asyncio
+import os
+import tempfile
+import shutil
+import socket
+import time
+from pathlib import Path
+from fastmcp import Client
+import pytest_asyncio
+import threading
+from snakemake_mcp_server.server import create_app
+
+SNAKEMAKE_WRAPPERS_PATH = os.environ.get("SNAKEMAKE_WRAPPERS_PATH")
+
+@pytest.fixture(scope="session")
+def wrappers_path():
+    if not SNAKEMAKE_WRAPPERS_PATH:
+        pytest.skip("SNAKEMAKE_WRAPPERS_PATH environment variable not set.")
+    return SNAKEMAKE_WRAPPERS_PATH
+
+@pytest.fixture(scope="session")
+def workflow_base_dir():
+    # Assuming snakebase is directly under snakemake-wrappers for testing
+    current_dir = Path(__file__).parent.parent.parent # snakemake-mcp-server/tests -> snakemake-mcp-server -> snakemake-wrappers
+    return str(current_dir / "snakebase")
+
+@pytest.fixture(scope="function")
+def server_port():
+    # Find a free port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+@pytest.fixture(scope="function")
+def server_url(server_port):
+    return f"http://127.0.0.1:{server_port}/mcp"
+
+@pytest.fixture(scope="function")
+def mcp_server(server_port, wrappers_path, workflow_base_dir):
+    app = create_app(wrappers_path, workflow_base_dir)
+    
+    def run_server():
+        app.run(transport="http", host="127.0.0.1", port=server_port, log_level="info")
+
+    server_thread = threading.Thread(target=run_server)
+    server_thread.daemon = True
+    server_thread.start()
+    
+    # Wait for the server to start
+    for _ in range(20): # Increased attempts for server startup
+        try:
+            with socket.create_connection(("127.0.0.1", server_port), timeout=1):
+                break
+        except (socket.timeout, ConnectionRefusedError):
+            time.sleep(0.5)
+    else:
+        pytest.fail("Server did not start in time.")
+        
+    yield
+    
+    # The server is a daemon thread, so it will be terminated automatically
+    # when the main thread exits.
+
+@pytest_asyncio.fixture(scope="function")
+async def http_client(server_url, mcp_server):
+    """创建HTTP客户端 - 每个测试独立的客户端实例"""
+    client = Client(server_url)
+    
+    # 使用短暂的连接，避免长时间保持连接导致的问题
+    try:
+        async with client:
+            # 简单的连通性测试
+            await asyncio.wait_for(client.ping(), timeout=10) # Increased timeout for ping
+            yield client
+    except Exception as e:
+        pytest.fail(f"Failed to connect to HTTP server: {e}")
+
+@pytest.fixture(scope="function")
+def test_files():
+    """创建测试文件"""
+    temp_dir = tempfile.mkdtemp(prefix="http_mcp_test_")
+    test_input = Path(temp_dir) / "test_genome.fasta"
+    test_output = Path(temp_dir) / "test_genome.fasta.fai"
+    
+    # 创建测试FASTA文件
+    with open(test_input, 'w') as f:
+        f.write(">chr1\nATCGATCGATCGATCGATCG\n")
+        f.write(">chr2\nGCTAGCTAGCTAGCTAGCTA\n")
+    
+    yield {
+        'input': str(test_input),
+        'output': str(test_output),
+        'temp_dir': temp_dir
+    }
+    
+    # 清理
+    try:
+        shutil.rmtree(temp_dir)
+    except Exception as e:
+        print(f"Warning: Failed to clean up {temp_dir}: {e}")

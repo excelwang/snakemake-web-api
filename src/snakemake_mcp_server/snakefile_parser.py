@@ -336,12 +336,13 @@ def analyze_wrapper_test_directory(wrapper_path: str, snakefile_path: str) -> Li
 def generate_demo_calls_for_wrapper(wrapper_path: str) -> List[Dict[str, Any]]:
     """
     Generate demo tool/process calls for a wrapper by analyzing its test Snakefile.
+    Returns the basic API call structure (just the payload for tool-processes).
     
     Args:
         wrapper_path: Path to the wrapper directory
         
     Returns:
-        List of demo API calls with example values
+        List of basic demo API call parameters (ready for tool-processes endpoint)
     """
     test_dir = Path(wrapper_path) / "test"
     snakefile = test_dir / "Snakefile"

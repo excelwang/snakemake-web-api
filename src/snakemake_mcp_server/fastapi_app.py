@@ -281,21 +281,21 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
             with open(meta_file_path, 'r', encoding='utf-8') as f:
                 meta_data = yaml.safe_load(f)
             
-            # Generate demo calls from the test Snakefile
-            demo_calls = generate_demo_calls_for_wrapper(full_path)
+            # Generate demo calls from the test Snakefile (returns basic API call structures)
+            basic_demo_calls = generate_demo_calls_for_wrapper(full_path)
             
             # Enhance each demo call to include API method and endpoint information
+            import json
             enhanced_demos = []
-            for demo_call in demo_calls:
-                # Create a curl example command
-                import json
-                payload_json = json.dumps(demo_call)
+            for basic_demo_call in basic_demo_calls:
+                # Create a curl example command using the basic demo call as the payload
+                payload_json = json.dumps(basic_demo_call)
                 curl_example = f'curl -X POST http://server/tool-processes -H "Content-Type: application/json" -d \'{payload_json}\''
                 
                 enhanced_demo = {
                     'method': 'POST',
                     'endpoint': '/tool-processes',
-                    'payload': demo_call,
+                    'payload': basic_demo_call,  # This contains just the API parameters for tool-processes
                     'curl_example': curl_example
                 }
                 enhanced_demos.append(enhanced_demo)
@@ -314,7 +314,7 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
                 demos=enhanced_demos
             )
             
-            logger.info(f"Successfully retrieved metadata for tool: {tool_path} with {len(demo_calls)} demo calls")
+            logger.info(f"Successfully retrieved metadata for tool: {tool_path} with {len(enhanced_demos)} demo calls")
             return wrapper_meta
             
         except HTTPException:

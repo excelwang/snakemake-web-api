@@ -7,6 +7,9 @@ from pathlib import Path
 from fastmcp import Client
 import yaml
 
+# Import the SnakemakeResponse model to check type
+from snakemake_mcp_server.fastapi_app import SnakemakeResponse
+
 @pytest.fixture(scope="function")
 def dummy_workflow_setup(workflows_dir):
     """Sets up a dummy Snakemake workflow for testing."""
@@ -76,7 +79,15 @@ async def test_run_snakemake_workflow_basic(http_client: Client, dummy_workflow_
         timeout=120 # Workflow execution might take time
     )
 
-    assert result.data.get('status') == 'success'
+    # The new FastAPI-first approach returns a structured SnakemakeResponse model
+    # Determine the correct access method based on the type
+    if hasattr(result.data, 'status'):  # If it's the new SnakemakeResponse model
+        status = result.data.status
+    else:
+        # For backward compatibility if it's still a dict
+        status = result.data.get('status') if isinstance(result.data, dict) else getattr(result.data, 'status', None)
+    
+    assert status == 'success'
     assert os.path.exists(output_file)
     with open(output_file, 'r') as f:
         content = f.read().strip()
@@ -102,7 +113,15 @@ async def test_run_snakemake_workflow_with_params(http_client: Client, dummy_wor
         timeout=120
     )
 
-    assert result.data.get('status') == 'success'
+    # The new FastAPI-first approach returns a structured SnakemakeResponse model
+    # Determine the correct access method based on the type
+    if hasattr(result.data, 'status'):  # If it's the new SnakemakeResponse model
+        status = result.data.status
+    else:
+        # For backward compatibility if it's still a dict
+        status = result.data.get('status') if isinstance(result.data, dict) else getattr(result.data, 'status', None)
+    
+    assert status == 'success'
     assert os.path.exists(output_file)
     with open(output_file, 'r') as f:
         content = f.read().strip()
@@ -122,4 +141,12 @@ async def test_lint_snakemake_workflow_template(http_client: Client):
         timeout=120
     )
 
-    assert result.data.get('status') == 'success'
+    # The new FastAPI-first approach returns a structured SnakemakeResponse model
+    # Determine the correct access method based on the type
+    if hasattr(result.data, 'status'):  # If it's the new SnakemakeResponse model
+        status = result.data.status
+    else:
+        # For backward compatibility if it's still a dict
+        status = result.data.get('status') if isinstance(result.data, dict) else getattr(result.data, 'status', None)
+    
+    assert status == 'success'

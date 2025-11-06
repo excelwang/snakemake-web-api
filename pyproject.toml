@@ -10,6 +10,8 @@ dependencies = [
     "click",
     "snakemake-wrapper-utils>=0.8.0",
     "pandas>=2.3.2",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
 ]
 
 [project.scripts]

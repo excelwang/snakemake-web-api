@@ -19,124 +19,24 @@ except ImportError as e:
     logger.error(f"Could not import runner module: {e}")
     sys.exit(1)
 
-def create_app(wrappers_path: str, workflows_dir: str) -> FastMCP:
-    """Create the FastMCP application."""
-    mcp = FastMCP("Snakemake Wrapper Server")
+# The native FastAPI implementation with proper Pydantic models
+# is now in the fastapi_app.py file to maintain consistency
+# and follow proper module separation.
 
-    @mcp.tool
-    async def run_snakemake_wrapper(
-        wrapper_name: str,
-        inputs: Optional[Union[Dict, List]] = None,
-        outputs: Optional[Union[Dict, List]] = None,
-        params: Optional[Dict] = None,
-        threads: int = 1,
-        log: Optional[Union[Dict, List]] = None,
-        extra_snakemake_args: str = "",
-        container: Optional[str] = None,
-        benchmark: Optional[str] = None,
-        resources: Optional[Dict] = None,
-        shadow: Optional[str] = None,
-        conda_env: Optional[str] = None,
-    ) -> Dict:
-        """
-        Executes a Snakemake wrapper by name and returns the result.
-        """
-        logger.info(f"Received request for wrapper: {wrapper_name}")
-        
-        if not wrapper_name:
-            raise ValueError("'wrapper_name' must be provided for wrapper execution.")
-
-        logger.info(f"Processing wrapper request: {wrapper_name}")
-        
-        try:
-            result = await anyio.to_thread.run_sync(
-                lambda: run_wrapper(
-                    wrapper_name=wrapper_name,
-                    inputs=inputs,
-                    outputs=outputs,
-                    params=params,
-                    threads=threads,
-                    log=log,
-                    extra_snakemake_args=extra_snakemake_args,
-                    wrappers_path=wrappers_path,
-                    container=container,
-                    benchmark=benchmark,
-                    resources=resources,
-                    shadow=shadow,
-                    conda_env=conda_env,
-                )
-            )
-            
-            logger.info(f"Wrapper execution completed with status: {result['status']}")
-            
-            if result['status'] == 'success':
-                return result
-            else:
-                error_msg = f"Wrapper '{wrapper_name}' failed: {result.get('error_message', 'Unknown error')}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
-                
-        except Exception as e:
-            logger.error(f"Error executing wrapper '{wrapper_name}': {str(e)}")
-            raise
-
-    @mcp.tool
-    async def run_snakemake_workflow(
-        workflow_name: str,
-        inputs: Optional[Union[Dict, List]] = None,
-        outputs: Optional[Union[Dict, List]] = None,
-        params: Optional[Dict] = None,
-        threads: int = 1,
-        log: Optional[Union[Dict, List]] = None,
-        extra_snakemake_args: str = "",
-        container: Optional[str] = None,
-        benchmark: Optional[str] = None,
-        resources: Optional[Dict] = None,
-        shadow: Optional[str] = None,
-        target_rule: Optional[str] = None,
-    ) -> Dict:
-        """
-        Executes a full Snakemake workflow by name and returns the result.
-        """
-        logger.info(f"Received request for workflow: {workflow_name}")
-
-        if not workflow_name:
-            raise ValueError("'workflow_name' must be provided for workflow execution.")
-
-        logger.info(f"Processing workflow request: {workflow_name}")
-
-        try:
-            result = await anyio.to_thread.run_sync(
-                lambda: run_workflow(
-                    workflow_name=workflow_name,
-                    inputs=inputs,
-                    outputs=outputs,
-                    params=params,
-                    threads=threads,
-                    log=log,
-                    extra_snakemake_args=extra_snakemake_args,
-                    workflows_dir=workflows_dir, # Pass workflows_dir
-                    container=container,
-                    benchmark=benchmark,
-                    resources=resources,
-                    shadow=shadow,
-                    target_rule=target_rule,
-                )
-            )
-
-            logger.info(f"Workflow execution completed with status: {result['status']}")
-
-            if result['status'] == 'success':
-                return result
-            else:
-                error_msg = f"Workflow '{workflow_name}' failed: {result.get('error_message', 'Unknown error')}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
-
-        except Exception as e:
-            logger.error(f"Error executing workflow '{workflow_name}': {str(e)}")
-            raise
-
+def create_mcp_from_fastapi(wrappers_path: str, workflows_dir: str):
+    """
+    Create an MCP server from the native FastAPI application.
+    This follows the recommended pattern from FastMCP documentation.
+    """
+    from .fastapi_app import create_native_fastapi_app
+    from fastmcp import FastMCP
+    
+    # First create the native FastAPI app
+    fastapi_app = create_native_fastapi_app(wrappers_path, workflows_dir)
+    
+    # Convert to MCP server
+    mcp = FastMCP.from_fastapi(app=fastapi_app)
+    
     return mcp
 
 import click
@@ -145,14 +45,55 @@ import click
 def cli():
     pass
 
+
 @cli.command()
 @click.option("--host", default="127.0.0.1", help="Host to bind to")
-@click.option("--port", default=8081, help="Port to bind to")
+@click.option("--port", default=8082, help="Port to bind to")
+@click.option("--snakebase-dir", default=os.environ.get("SNAKEBASE_DIR", "./snakebase"), help="Base directory for snakebase.")
+def run_fastapi_rest(host, port, snakebase_dir):
+    """Starts the Snakemake Wrapper Server as a native FastAPI REST API."""
+    import uvicorn
+    from .fastapi_app import create_native_fastapi_app
+    
+    logger.info(f"Starting Snakemake Wrapper Server as native FastAPI REST API...")
+    logger.info(f"FastAPI server will be available at http://{host}:{port}")
+    logger.info(f"All endpoints will be available as standard REST endpoints")
+    
+    wrappers_path = os.path.abspath(os.path.join(snakebase_dir, "snakemake-wrappers"))
+    workflows_dir = os.path.abspath(os.path.join(snakebase_dir, "snakemake-workflows"))
+    
+    logger.info(f"Using snakebase from: {os.path.abspath(snakebase_dir)}")
+    
+    if not os.path.isdir(wrappers_path):
+        logger.error(f"Wrappers directory not found at: {wrappers_path}")
+        sys.exit(1)
+    
+    if not os.path.isdir(workflows_dir):
+        logger.error(f"Workflows directory not found at: {workflows_dir}")
+        sys.exit(1)
+
+    # Create the native FastAPI app
+    app = create_native_fastapi_app(wrappers_path, workflows_dir)
+    
+    # Run with uvicorn
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="info"
+    )
+
+
+@cli.command()
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=8083, help="Port to bind to")
 @click.option("--log-level", default="INFO", help="Log level")
 @click.option("--snakebase-dir", default=os.environ.get("SNAKEBASE_DIR", "./snakebase"), help="Base directory for snakebase.")
-def run(host, port, log_level, snakebase_dir):
-    """Starts the Snakemake Wrapper MCP Server."""
-    logger.info(f"Starting Snakemake Wrapper MCP Server...")
+def run_mcp_from_fastapi(host, port, log_level, snakebase_dir):
+    """Starts the Snakemake Wrapper MCP Server converted from FastAPI endpoints."""
+    from .fastapi_app import create_mcp_from_fastapi
+    
+    logger.info(f"Starting Snakemake Wrapper MCP Server (converted from FastAPI)...")
     logger.info(f"Server will be available at http://{host}:{port}")
     
     wrappers_path = os.path.abspath(os.path.join(snakebase_dir, "snakemake-wrappers"))
@@ -168,7 +109,7 @@ def run(host, port, log_level, snakebase_dir):
         logger.error(f"Workflows directory not found at: {workflows_dir}")
         sys.exit(1)
 
-    mcp = create_app(wrappers_path, workflows_dir)
+    mcp = create_mcp_from_fastapi(wrappers_path, workflows_dir)
 
     try:
         mcp.run(
@@ -182,6 +123,7 @@ def run(host, port, log_level, snakebase_dir):
     except Exception as e:
         logger.error(f"Server failed to start: {e}")
         sys.exit(1)
+
 
 def main():
     cli()

@@ -3,6 +3,9 @@ import asyncio
 import os
 from fastmcp import Client
 
+# Import the SnakemakeResponse model to check type
+from snakemake_mcp_server.fastapi_app import SnakemakeResponse
+
 @pytest.mark.asyncio
 async def test_run_wrapper_http_success(http_client: Client, test_files):
     """测试通过HTTP成功执行wrapper"""
@@ -22,11 +25,19 @@ async def test_run_wrapper_http_success(http_client: Client, test_files):
     
     # 验证结果
     assert hasattr(result, 'data'), "Result should have data attribute"
-    assert isinstance(result.data, dict), "Result data should be a dictionary"
+    
+    # The new FastAPI-first approach returns a structured SnakemakeResponse model
+    # Determine the correct access method based on the type
+    if hasattr(result.data, 'status'):  # If it's the new SnakemakeResponse model
+        status = result.data.status
+        error_message = result.data.error_message
+    else:
+        # For backward compatibility if it's still a dict
+        status = result.data.get('status') if isinstance(result.data, dict) else getattr(result.data, 'status', None)
+        error_message = result.data.get('error_message') if isinstance(result.data, dict) else getattr(result.data, 'error_message', None)
     
     # 验证执行状态
-    assert result.data.get('status') == 'success', \
-        f"Expected success, got {result.data.get('status')}: {result.data.get('error_message')}"
+    assert status == 'success', f"Expected success, got {status}: {error_message}"
     
     # 验证输出文件
     assert os.path.exists(test_files['output']), \

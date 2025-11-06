@@ -9,7 +9,7 @@ from pathlib import Path
 from fastmcp import Client
 import pytest_asyncio
 import threading
-from snakemake_mcp_server.server import create_app
+from snakemake_mcp_server.server import create_mcp_from_fastapi
 
 SNAKEBASE_DIR = os.environ.get("SNAKEBASE_DIR")
 
@@ -40,7 +40,7 @@ def server_url(server_port):
 
 @pytest.fixture(scope="function")
 def mcp_server(server_port, wrappers_path, workflows_dir):
-    app = create_app(wrappers_path, workflows_dir)
+    app = create_mcp_from_fastapi(wrappers_path, workflows_dir)
     
     def run_server():
         app.run(transport="http", host="127.0.0.1", port=server_port, log_level="info")

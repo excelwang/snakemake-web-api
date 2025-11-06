@@ -284,6 +284,22 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
             # Generate demo calls from the test Snakefile
             demo_calls = generate_demo_calls_for_wrapper(full_path)
             
+            # Enhance each demo call to include API method and endpoint information
+            enhanced_demos = []
+            for demo_call in demo_calls:
+                # Create a curl example command
+                import json
+                payload_json = json.dumps(demo_call)
+                curl_example = f'curl -X POST http://server/tool-processes -H "Content-Type: application/json" -d \'{payload_json}\''
+                
+                enhanced_demo = {
+                    'method': 'POST',
+                    'endpoint': '/tool-processes',
+                    'payload': demo_call,
+                    'curl_example': curl_example
+                }
+                enhanced_demos.append(enhanced_demo)
+            
             # Create and return the WrapperMetadata object
             wrapper_meta = WrapperMetadata(
                 name=meta_data.get('name', os.path.basename(full_path)),
@@ -295,7 +311,7 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
                 params=meta_data.get('params'),
                 notes=meta_data.get('notes'),
                 path=tool_path,
-                demos=demo_calls
+                demos=enhanced_demos
             )
             
             logger.info(f"Successfully retrieved metadata for tool: {tool_path} with {len(demo_calls)} demo calls")

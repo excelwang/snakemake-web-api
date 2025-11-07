@@ -114,18 +114,7 @@ def parse_snakefile_with_api(snakefile_path: str) -> List[Dict[str, Any]]:
                 
             return parsed_rules
 
-    except ImportError as e:
-        if "circular import" in str(e).lower() or "partially initialized module" in str(e).lower():
-            print(f"Error: Circular import in snakemake. This is likely due to version incompatibility: {e}", file=sys.stderr)
-        else:
-            print(f"Error: Snakemake is not installed or accessible. Please install Snakemake. {e}", file=sys.stderr)
-        return []
     except Exception as e:
-        # Check if it's a storage plugin error and handle it gracefully
-        error_msg = str(e)
-        if "storage-plugin" in error_msg.lower() or "snakemake plugin" in error_msg.lower():
-            print(f"Storage plugin error (this is expected for some test Snakefiles): {e}", file=sys.stderr)
-            return []
         print(f"Error parsing Snakefile with API: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc(file=sys.stderr)

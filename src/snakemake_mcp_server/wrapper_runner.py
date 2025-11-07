@@ -55,10 +55,11 @@ def _format_rule_section(data, directive: str = ""):
         elif isinstance(data, list):
             items = []
             for value in data:
-                if isinstance(value, str) and ("(" in value or "[" in value):
-                    items.append(value)
-                else:
-                    items.append(repr(value))
+                if isinstance(value, str):
+                    if "(" in value or "[" in value:
+                        items.append(value)
+                    else:
+                        items.append(repr(value))
             return textwrap.indent(",\n".join(items), "        ")
         elif isinstance(data, str) and ("(" in data or "[" in data):
             return textwrap.indent(data, "        ")

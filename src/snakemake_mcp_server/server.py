@@ -104,6 +104,13 @@ def rest(ctx, host, port, log_level):
     """Start the Snakemake server with native FastAPI REST endpoints."""
     import uvicorn
     from .fastapi_app import create_native_fastapi_app
+
+    # Reconfigure logging to respect the user's choice
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        force=True  # This is crucial to override the initial config
+    )
     
     # Get paths from context (already strings now)
     wrappers_path = ctx.obj['WRAPPERS_PATH']
@@ -149,6 +156,13 @@ def rest(ctx, host, port, log_level):
 def mcp(ctx, host, port, log_level):
     """Start the Snakemake server with MCP protocol support."""
     from .fastapi_app import create_mcp_from_fastapi
+
+    # Reconfigure logging to respect the user's choice
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        force=True  # This is crucial to override the initial config
+    )
     
     # Get paths from context (already strings now)
     wrappers_path = ctx.obj['WRAPPERS_PATH']

@@ -11,7 +11,7 @@ def test_run_wrapper_with_shadow(test_files):
     
     # 1. 调用 run_wrapper，并设置 shadow 参数
     result = run_wrapper(
-        wrapper_name="samtools/faidx",
+        wrapper_name="bio/samtools/faidx",
         wrappers_path=wrappers_path,
         inputs=[test_files['input']],
         outputs=[test_files['output']],

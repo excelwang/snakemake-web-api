@@ -1,9 +1,3 @@
-"""
-Native FastAPI implementation for Snakemake functionality.
-
-This module provides native FastAPI endpoints that can be converted to MCP tools
-using the FastMCP.from_fastapi() method.
-"""
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Union, Dict, List, Optional, Any
@@ -60,7 +54,6 @@ class DemoCall(BaseModel):
     method: str
     endpoint: str
     payload: Dict[str, Any]
-    curl_example: str
 
 
 class WrapperMetadata(BaseModel):
@@ -106,6 +99,8 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
         Returns:
             List of WrapperMetadata objects
         """
+        from .snakefile_parser import generate_demo_calls_for_wrapper
+        import json
         wrappers = []
         
         # Walk through the wrapper directory structure, excluding .snakemake and other hidden directories
@@ -127,6 +122,18 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
                         notes_data = meta_data.get('notes')
                         if isinstance(notes_data, str):
                             notes_data = [notes_data]
+
+                        # Generate demo calls
+                        basic_demo_calls = generate_demo_calls_for_wrapper(root)
+                        enhanced_demos = []
+                        if basic_demo_calls:
+                            for basic_demo_call in basic_demo_calls:
+                                enhanced_demo = DemoCall(
+                                    method='POST',
+                                    endpoint='/tool-processes',
+                                    payload=basic_demo_call
+                                )
+                                enhanced_demos.append(enhanced_demo)
                         
                         # Create a WrapperMetadata object
                         wrapper_meta = WrapperMetadata(
@@ -138,7 +145,8 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
                             output=meta_data.get('output'),
                             params=meta_data.get('params'),
                             notes=notes_data,
-                            path=wrapper_path
+                            path=wrapper_path,
+                            demos=enhanced_demos or None
                         )
                         wrappers.append(wrapper_meta)
                     except Exception as e:
@@ -302,16 +310,11 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
             import json
             enhanced_demos = []
             for basic_demo_call in basic_demo_calls:
-                # Create a curl example command using the basic demo call as the payload
-                payload_json = json.dumps(basic_demo_call)
-                curl_example = f'curl -X POST http://server/tool-processes -H "Content-Type: application/json" -d \'{payload_json}\''
-                
                 # Create DemoCall objects to ensure FastMCP properly recognizes them
                 enhanced_demo = DemoCall(
                     method='POST',
                     endpoint='/tool-processes',
                     payload=basic_demo_call,  # This contains just the API parameters for tool-processes
-                    curl_example=curl_example
                 )
                 enhanced_demos.append(enhanced_demo)
             

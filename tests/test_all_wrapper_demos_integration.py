@@ -47,9 +47,8 @@ async def test_all_wrapper_demos_integration(rest_client):
     # Keep track of failed wrappers for summary
     failed_wrappers = []
     
-    for i, wrapper in enumerate(wrappers[3:4]):
+    for i, wrapper in enumerate(wrappers):
         wrapper_path = wrapper.get("path", "")
-        wrapper_name = wrapper.get("name", f"Unknown-{i}")
         
         if not wrapper_path:
             logging.warning(f"Wrapper {i+1}/{total_wrappers}: Skipped - no path available")

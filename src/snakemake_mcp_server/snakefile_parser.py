@@ -365,79 +365,7 @@ def generate_demo_calls_for_wrapper(wrapper_path: str) -> List[Dict[str, Any]]:
             'usage_notes': 'Replace placeholder values (like {sample}) with actual file paths'
         }
         
-        # Create example file paths by replacing placeholders with actual values
-        example_call = create_example_call(call)
-        call['example_usage'] = example_call
-        
     return demo_calls
-
-
-def create_example_call(tool_call: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Create an example API call with placeholder values replaced by example values.
-    
-    Args:
-        tool_call: The parsed tool call with placeholders
-        
-    Returns:
-        Dictionary with example values for demonstration
-    """
-    import copy
-    example_call = copy.deepcopy(tool_call)
-    
-    # Replace placeholders in inputs and outputs with example values
-    if isinstance(example_call['inputs'], list):
-        example_call['inputs'] = [replace_placeholders(val, example_call.get('wrapper_name', 'wrapper')) for val in example_call['inputs']]
-    elif isinstance(example_call['inputs'], dict):
-        for key, val in example_call['inputs'].items():
-            example_call['inputs'][key] = replace_placeholders(val, example_call.get('wrapper_name', 'wrapper'))
-    
-    if isinstance(example_call['outputs'], list):
-        example_call['outputs'] = [replace_placeholders(val, example_call.get('wrapper_name', 'wrapper')) for val in example_call['outputs']]
-    elif isinstance(example_call['outputs'], dict):
-        for key, val in example_call['outputs'].items():
-            example_call['outputs'][key] = replace_placeholders(val, example_call.get('wrapper_name', 'wrapper'))
-    
-    # Also update log if exists
-    if isinstance(example_call['log'], list):
-        example_call['log'] = [replace_placeholders(val, example_call.get('wrapper_name', 'wrapper')) for val in example_call['log']]
-    elif isinstance(example_call['log'], dict):
-        for key, val in example_call['log'].items():
-            example_call['log'][key] = replace_placeholders(val, example_call.get('wrapper_name', 'wrapper'))
-    
-    return example_call
-
-
-def replace_placeholders(text: str, wrapper_name: str) -> str:
-    """
-    Replace common placeholders in file paths with example values.
-    
-    Args:
-        text: The text with placeholders
-        wrapper_name: The wrapper name for context
-        
-    Returns:
-        Text with placeholders replaced by example values
-    """
-    import re
-    
-    # Common placeholders to replace with examples
-    examples = {
-        r'\{sample\}': 'example_sample',
-        r'\{tool\}': 'example_tool',
-        r'\{name\}': 'example_name',
-        r'\{group\}': 'example_group',
-        r'\{unit\}': 'example_unit',
-        r'\{batch\}': 'example_batch',
-        # More generic
-        r'\{.*?\}': 'example_value'  # Replace any remaining placeholders
-    }
-    
-    result = text
-    for pattern, replacement in examples.items():
-        result = re.sub(pattern, replacement, result)
-    
-    return result
 
 
 # Example usage:

@@ -1,254 +1,155 @@
-import subprocess
-import tempfile
 import os
-import textwrap
+import sys
 import logging
 from pathlib import Path
 from typing import Union, Dict, List, Optional
+from io import StringIO
+from contextlib import redirect_stdout, redirect_stderr
 
 logger = logging.getLogger(__name__)
 
-def _validate_inputs(wrapper_name: str, 
-                    inputs: Optional[Union[Dict, List]] = None, 
-                    outputs: Optional[Union[Dict, List]] = None, 
-                    params: Optional[Dict] = None, threads: int = 1, 
-                    log: Optional[Union[Dict, List]] = None) -> None:
-    """Validate input parameters."""
-    if not wrapper_name or not isinstance(wrapper_name, str):
-        raise ValueError("wrapper_name must be a non-empty string")
-    
-    if not isinstance(threads, int) or threads < 1:
-        raise ValueError("threads must be a positive integer")
-    
-    # 验证文件路径格式 (only if inputs are provided)
-    if inputs is not None:
-        if isinstance(inputs, dict):
-            for key, value in inputs.items():
-                if not isinstance(value, (str, list)):
-                    raise ValueError(f"Invalid input format for key '{key}': {type(value)}")
-        elif isinstance(inputs, list):
-            for item in inputs:
-                if not isinstance(item, str):
-                    raise ValueError(f"Invalid input format: {type(item)}")
-        else:
-            raise ValueError("inputs must be a dict or list or None")
-
-def _format_rule_section(data, directive: str = ""):
-    """Helper function to format a dictionary or list into a Snakemake rule string."""
-    if data is None:
-        return ""
-    if not data:
-        return ""
-    
-    try:
-        if directive == "resources":
-            items = [f"{key}={value}" for key, value in data.items()]
-            return textwrap.indent(",\n".join(items), "        ")
-        elif isinstance(data, dict):
-            items = []
-            for key, value in data.items():
-                if isinstance(value, str) and ("(" in value or "[" in value):
-                    items.append(f"{key}={value}")
-                else:
-                    items.append(f"{key}={repr(value)}")
-            return textwrap.indent(",\n".join(items), "        ")
-        elif isinstance(data, list):
-            items = []
-            for value in data:
-                if isinstance(value, str):
-                    if "(" in value or "[" in value:
-                        items.append(value)
-                    else:
-                        items.append(repr(value))
-            return textwrap.indent(",\n".join(items), "        ")
-        elif isinstance(data, str) and ("(" in data or "[" in data):
-            return textwrap.indent(data, "        ")
-        else:
-            return textwrap.indent(repr(data), "        ")
-    except Exception as e:
-        logger.error(f"Error formatting rule section: {e}")
-        raise ValueError(f"Failed to format rule section: {e}")
-
-def run_wrapper(wrapper_name: str, 
-                wrappers_path: str, 
-                inputs: Optional[Union[Dict, List]] = None, 
-                outputs: Optional[Union[Dict, List]] = None, 
-                params: Optional[Dict] = None, threads: int = 1, 
-                log: Optional[Union[Dict, List]] = None, 
-                extra_snakemake_args: str = "", 
-                container: Optional[str] = None,
-                benchmark: Optional[str] = None,
-                resources: Optional[Dict] = None,
-                shadow: Optional[str] = None,
-                conda_env: Optional[str] = None,
-                workdir: Optional[str] = None,
-                timeout: int = 600) -> Dict:
-    """ 
-    Dynamically generates a Snakefile to run a single Snakemake wrapper and executes it.
-    
-    Args:
-        timeout (int): Timeout in seconds for the subprocess execution.
+def run_wrapper(
+    # Align with Snakemake Rule properties
+    wrapper_name: str,
+    wrappers_path: str,
+    inputs: Optional[Union[Dict, List]] = None,
+    outputs: Optional[Union[Dict, List]] = None,
+    params: Optional[Dict] = None,
+    log: Optional[Union[Dict, List]] = None,
+    threads: int = 1,
+    resources: Optional[Dict] = None,
+    priority: int = 0,
+    shadow_depth: Optional[str] = None,
+    benchmark: Optional[str] = None,
+    conda_env: Optional[str] = None,
+    container_img: Optional[str] = None,
+    env_modules: Optional[List[str]] = None,
+    group: Optional[str] = None,
+    # Execution control
+    workdir: Optional[str] = None,
+    timeout: int = 600,
+) -> Dict:
     """
-    snakefile_path = None
-    temp_conda_env_file = None
+    Executes a single Snakemake wrapper by programmatically building a workflow in memory.
+    """
+    # Snakemake API imports (moved inside function to avoid circular imports)
+    from snakemake.workflow import Workflow
+    from snakemake.settings.types import (
+        ConfigSettings, ResourceSettings, WorkflowSettings, StorageSettings,
+        DeploymentSettings, ExecutionSettings, SchedulingSettings, OutputSettings, DAGSettings
+    )
+    from snakemake.executors.local import Executor as LocalExecutor
+    from snakemake.executors import ExecutorSettings as LocalExecutorSettings
+    from snakemake.scheduler import Greeduler as GreedyScheduler
+    from snakemake.exceptions import WorkflowError, print_exception
+    from snakemake.deployment.env_modules import EnvModules
+
+    stdout_capture = StringIO()
+    stderr_capture = StringIO()
+    original_cwd = os.getcwd()
+
     try:
-        # 验证输入
-        _validate_inputs(wrapper_name, inputs, outputs, params, threads, log)
+        # 1. Prepare working directory
+        if workdir:
+            execution_workdir = Path(workdir).resolve()
+            os.makedirs(execution_workdir, exist_ok=True)
+        else:
+            import tempfile
+            execution_workdir = Path(tempfile.mkdtemp(prefix="snakemake-wrapper-run-"))
+        os.chdir(execution_workdir)
+
+        # 2. Instantiate Workflow object
+        workflow = Workflow(
+            config_settings=ConfigSettings(),
+            resource_settings=ResourceSettings(),
+            workflow_settings=WorkflowSettings(),
+            storage_settings=StorageSettings(),
+            deployment_settings=DeploymentSettings(),
+            execution_settings=ExecutionSettings(),
+            scheduling_settings=SchedulingSettings(),
+            output_settings=OutputSettings(),
+            dag_settings=DAGSettings(),
+        )
+        workflow.overwrite_workdir = execution_workdir
+
+        # 3. Add and populate a single rule in memory
+        rule = workflow.add_rule("run_single_wrapper")
+
+        if isinstance(inputs, dict):
+            rule.set_input(**inputs)
+        elif isinstance(inputs, list):
+            rule.set_input(*inputs)
+
+        if isinstance(outputs, dict):
+            rule.set_output(**outputs)
+        elif isinstance(outputs, list):
+            rule.set_output(*outputs)
+        else:
+            raise ValueError("'outputs' must be provided.")
+
+        if params:
+            rule.set_params(**params)
+        if log:
+            if isinstance(log, dict):
+                rule.set_log(**log)
+            else:
+                rule.set_log(*log)
         
-        # 确定wrapper路径
+        rule.resources = resources or {}
+        rule.resources["_cores"] = threads
+        rule.priority = priority
+        rule.shadow_depth = shadow_depth
+        if benchmark:
+            rule.benchmark = benchmark
+        if conda_env:
+            rule.conda_env = conda_env
+        if container_img:
+            rule.container_img = container_img
+        if env_modules:
+            rule.env_modules = EnvModules(*env_modules)
+        if group:
+            rule.group = group
+
         wrapper_path = Path(wrappers_path) / wrapper_name
         if not wrapper_path.exists():
             raise FileNotFoundError(f"Wrapper not found at: {wrapper_path}")
-        
-        # Convert to absolute path to avoid resolution issues
-        wrapper_path = wrapper_path.resolve()
-        wrapper_url = f"file://{wrapper_path}"
-        
-        # 格式化规则部分
-        input_str = _format_rule_section(inputs)
-        output_str = _format_rule_section(outputs)
-        params_str = _format_rule_section(params)
-        log_str = _format_rule_section(log)
-        benchmark_str = f'benchmark: "{benchmark}"' if benchmark else ""
-        container_str = f'container: "{container}"' if container else ""
-        resources_str = _format_rule_section(resources, "resources") if resources else ""
-        shadow_str = f'shadow: "{shadow}"' if shadow else ""
-        
-        conda_str = ""
-        if conda_env:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as tmp:
-                tmp.write(conda_env)
-                temp_conda_env_file = tmp.name
-            conda_str = f'conda: "{temp_conda_env_file}"'
+        rule.wrapper = f"file://{wrapper_path.resolve()}"
 
-        # 组装Snakefile内容
-        snakefile_content = f"""
-rule run_single_wrapper:
-    input:
-{input_str}
-    output:
-{output_str}
-    params:
-{params_str}
-    threads:
-        {threads}
-    log:
-{log_str}
-    {benchmark_str}
-    {container_str}
-    {conda_str}
-    resources:
-{resources_str}
-    {shadow_str}
-    wrapper:
-        "{wrapper_url}"
-"""
-        
-        logger.debug(f"Snakefile content:\n{snakefile_content}")
+        # 4. Set execution targets
+        target_files = list(outputs.values()) if isinstance(outputs, dict) else outputs
+        workflow.dag_settings.targets = target_files
 
-        # 创建临时Snakefile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.smk', delete=False) as tmp_snakefile:
-            tmp_snakefile.write(snakefile_content)
-            snakefile_path = tmp_snakefile.name
+        # 5. Execute the workflow in memory
+        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+            log_capture = StringIO()
+            stream_handler = logging.StreamHandler(log_capture)
+            logging.getLogger("snakemake").addHandler(stream_handler)
 
-        logger.debug(f"Generated temporary Snakefile at: {snakefile_path}")
-        
-        # 确定目标文件
-        if outputs:
-            if isinstance(outputs, dict):
-                snakemake_target = list(outputs.values())[0]
-            elif isinstance(outputs, list):
-                snakemake_target = outputs[0]
-            else:
-                raise ValueError("'outputs' must be a dict or list.")
+            try:
+                executor_plugin = LocalExecutor.get_plugin()
+                scheduler_plugin = GreedyScheduler.get_plugin()
+                success = workflow.execute(
+                    executor_plugin=executor_plugin,
+                    executor_settings=executor_plugin.settings_cls(),
+                    scheduler_plugin=scheduler_plugin,
+                    scheduler_settings=scheduler_plugin.settings_cls(),
+                )
+            finally:
+                logging.getLogger("snakemake").removeHandler(stream_handler)
+
+        final_stdout = stdout_capture.getvalue()
+        final_stderr = stderr_capture.getvalue() + log_capture.getvalue()
+
+        if success:
+            return {"status": "success", "stdout": final_stdout, "stderr": final_stderr, "exit_code": 0}
         else:
-            raise ValueError("'outputs' must be provided for wrapper execution.")
+            return {"status": "failed", "stdout": final_stdout, "stderr": final_stderr, "exit_code": 1, "error_message": "Workflow execution failed."}
 
-        # 构建Snakemake命令
-        command = [
-            "snakemake", 
-            "--snakefile", str(snakefile_path),
-            snakemake_target,
-            "--use-conda", 
-            "--cores", str(threads),
-            "--printshellcmds"
-        ]
-        
-        # 添加额外参数
-        if extra_snakemake_args:
-            command.extend(extra_snakemake_args.split())
-        
-        logger.info(f"Executing command: {' '.join(command)}")
-        
-        # Set the working directory
-        if workdir:
-            cwd = workdir
-        else:
-            cwd = wrappers_path
-
-        # 执行命令 - 使用绝对路径作为工作目录
-        result = subprocess.run(
-            command, 
-            check=True, 
-            capture_output=True, 
-            text=True,
-            timeout=timeout,
-            cwd=Path(cwd).resolve()
-        )
-        
-        return {
-            "status": "success",
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exit_code": result.returncode
-        }
-
-    except subprocess.CalledProcessError as e:
-        error_msg = f"Snakemake wrapper execution failed with exit code {e.returncode}"
-        logger.error(error_msg)
-        logger.error(f"Stdout:\n{e.stdout}")
-        logger.error(f"Stderr:\n{e.stderr}")
-        return {
-            "status": "failed",
-            "stdout": e.stdout or "",
-            "stderr": e.stderr or "",
-            "exit_code": e.returncode,
-            "error_message": error_msg
-        }
-    
-    except subprocess.TimeoutExpired as e:
-        error_msg = f"Snakemake wrapper execution timed out after {timeout} seconds"
-        logger.error(error_msg)
-        return {
-            "status": "failed",
-            "stdout": e.stdout.decode() if e.stdout else "",
-            "stderr": e.stderr.decode() if e.stderr else "",
-            "exit_code": -1,
-            "error_message": error_msg
-        }
-    
     except Exception as e:
-        error_msg = f"Unexpected error: {str(e)}"
-        logger.error(error_msg)
-        return {
-            "status": "failed",
-            "stdout": "",
-            "stderr": str(e),
-            "exit_code": -1,
-            "error_message": error_msg
-        }
-    
+        stderr_val = stderr_capture.getvalue()
+        exc_buffer = StringIO()
+        print_exception(e, exc_buffer)
+        stderr_val += exc_buffer.getvalue()
+        return {"status": "failed", "stdout": stdout_capture.getvalue(), "stderr": stderr_val, "exit_code": -1, "error_message": str(e)}
     finally:
-        # 清理临时文件
-        if snakefile_path and os.path.exists(snakefile_path):
-            try:
-                os.remove(snakefile_path)
-                logger.debug(f"Removed temporary Snakefile: {snakefile_path}")
-            except Exception as e:
-                logger.warning(f"Failed to remove temporary Snakefile {snakefile_path}: {e}")
-        if temp_conda_env_file and os.path.exists(temp_conda_env_file):
-            try:
-                os.remove(temp_conda_env_file)
-                logger.debug(f"Removed temporary conda env file: {temp_conda_env_file}")
-            except Exception as e:
-                logger.warning(f"Failed to remove temporary conda env file {temp_conda_env_file}: {e}")
+        os.chdir(original_cwd)

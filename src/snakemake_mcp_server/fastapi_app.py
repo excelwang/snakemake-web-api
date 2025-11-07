@@ -16,14 +16,16 @@ class SnakemakeWrapperRequest(BaseModel):
     inputs: Optional[Union[Dict, List]] = None
     outputs: Optional[Union[Dict, List]] = None
     params: Optional[Dict] = None
-    threads: int = 1
     log: Optional[Union[Dict, List]] = None
-    extra_snakemake_args: str = ""
-    container: Optional[str] = None
-    benchmark: Optional[str] = None
+    threads: int = 1
     resources: Optional[Dict] = None
-    shadow: Optional[str] = None
+    priority: int = 0
+    shadow_depth: Optional[str] = None
+    benchmark: Optional[str] = None
     conda_env: Optional[str] = None
+    container_img: Optional[str] = None
+    env_modules: Optional[List[str]] = None
+    group: Optional[str] = None
     workdir: Optional[str] = None
 
 
@@ -121,7 +123,8 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
                         # Handle notes field to ensure it is a list
                         notes_data = meta_data.get('notes')
                         if isinstance(notes_data, str):
-                            notes_data = [notes_data]
+                            # Split multi-line string into a list of strings, cleaning each line
+                            notes_data = [line.strip() for line in notes_data.split('\n') if line.strip()]
 
                         # Generate demo calls
                         basic_demo_calls = generate_demo_calls_for_wrapper(root)
@@ -177,20 +180,21 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
                 None,
                 lambda: run_wrapper(
                     wrapper_name=request.wrapper_name,
-                    wrappers_path=app.state.wrappers_path,  # Use app.state as before to maintain consistency
+                    wrappers_path=app.state.wrappers_path,
                     inputs=request.inputs,
                     outputs=request.outputs,
                     params=request.params,
-                    threads=request.threads,
                     log=request.log,
-                    extra_snakemake_args=request.extra_snakemake_args,
-                    container=request.container,
-                    benchmark=request.benchmark,
+                    threads=request.threads,
                     resources=request.resources,
-                    shadow=request.shadow,
+                    priority=request.priority,
+                    shadow_depth=request.shadow_depth,
+                    benchmark=request.benchmark,
                     conda_env=request.conda_env,
+                    container_img=request.container_img,
+                    env_modules=request.env_modules,
+                    group=request.group,
                     workdir=request.workdir,
-                    timeout=600  # timeout
                 )
             )
             
@@ -318,6 +322,12 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
                 )
                 enhanced_demos.append(enhanced_demo)
             
+            # Handle notes field to ensure it is a list
+            notes_data = meta_data.get('notes')
+            if isinstance(notes_data, str):
+                # Split multi-line string into a list of strings, cleaning each line
+                notes_data = [line.strip() for line in notes_data.split('\n') if line.strip()]
+            
             # Create and return the WrapperMetadata object
             wrapper_meta = WrapperMetadata(
                 name=meta_data.get('name', os.path.basename(full_path)),
@@ -327,7 +337,7 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
                 input=meta_data.get('input'),
                 output=meta_data.get('output'),
                 params=meta_data.get('params'),
-                notes=meta_data.get('notes'),
+                notes=notes_data,
                 path=tool_path,
                 demos=enhanced_demos
             )
@@ -344,19 +354,3 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
 
 
     return app
-
-
-def create_mcp_from_fastapi(wrappers_path: str, workflows_dir: str):
-    """
-    Create an MCP server from the native FastAPI application.
-    This follows the recommended pattern from FastMCP documentation.
-    """
-    from fastmcp import FastMCP
-    
-    # First create the native FastAPI app
-    fastapi_app = create_native_fastapi_app(wrappers_path, workflows_dir)
-    
-    # Convert to MCP server
-    mcp = FastMCP.from_fastapi(app=fastapi_app)
-    
-    return mcp

@@ -31,30 +31,17 @@ def run_wrapper(
     timeout: int = 600,
 ) -> Dict:
     """
-    Executes a single Snakemake wrapper by programmatically building a workflow.
-    Runs in the original workdir with a temporary, uniquely-named Snakefile.
+    Executes a single Snakemake wrapper by generating a Snakefile and running
+    Snakemake via the command line, which is more robust than the Python API.
     """
-    # Delayed Snakemake API imports with error handling to avoid circular imports
-    try:
-        from snakemake.api import SnakemakeApi
-        from snakemake.settings.types import ConfigSettings, ResourceSettings, WorkflowSettings, StorageSettings, \
-            DeploymentSettings, ExecutionSettings, SchedulingSettings, OutputSettings, DAGSettings
-        from snakemake.resources import DefaultResources
-    except ImportError as e:
-        return {"status": "failed", "stdout": "", "stderr": f"Failed to import snakemake: {e}", "exit_code": -1, "error_message": f"Import error: {e}"}
-
-    stdout_capture = StringIO()
-    stderr_capture = StringIO()
     original_cwd = os.getcwd()
     snakefile_path = None  # Initialize to ensure it's available in finally block
 
     # Defensively resolve wrappers_path to an absolute path BEFORE changing directory.
-    # This makes the function robust regardless of how it's called.
     abs_wrappers_path = Path(wrappers_path).resolve()
 
     try:
         # 1. Prepare working directory
-        # As per request, run in the original workdir if provided
         if not workdir or not Path(workdir).is_dir():
             return {"status": "failed", "stdout": "", "stderr": "A valid 'workdir' must be provided for execution.", "exit_code": -1, "error_message": "Missing or invalid workdir."}
 
@@ -64,12 +51,11 @@ def run_wrapper(
         # 2. Generate temporary Snakefile with a unique name in the workdir
         import tempfile
         
-        # Using NamedTemporaryFile to guarantee a unique name and handle cleanup
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".smk", dir=execution_workdir, encoding='utf-8') as tmp_snakefile:
             snakefile_path = Path(tmp_snakefile.name)
             snakefile_content = _generate_wrapper_snakefile(
                 wrapper_name=wrapper_name,
-                wrappers_path=str(abs_wrappers_path),  # Pass the absolute path
+                wrappers_path=str(abs_wrappers_path),
                 inputs=inputs,
                 outputs=outputs,
                 params=params,
@@ -86,69 +72,48 @@ def run_wrapper(
             )
             tmp_snakefile.write(snakefile_content)
 
-        # 3. Use SnakemakeApi to execute - must be in a with statement
-        config_settings = ConfigSettings()
-        resource_settings = ResourceSettings(cores=threads)  # Set cores here
-        workflow_settings = WorkflowSettings()
-        storage_settings = StorageSettings()
-        deployment_settings = DeploymentSettings()
-        if conda_env:
-            deployment_settings.use_conda = True
+        # 3. Build and run Snakemake command using subprocess
+        import subprocess
 
-        execution_settings = ExecutionSettings()  # No special parameters needed here
-        scheduling_settings = SchedulingSettings()
-        
-        # Set targets if outputs are specified
+        cmd = [
+            "snakemake",
+            "--snakefile", str(snakefile_path),
+            "--cores", str(threads),
+            "--use-conda",
+            "--nocolor",
+            "--forceall"  # Force execution since we are in a temp/isolated context
+        ]
+
+        # Add targets if they exist
         if outputs:
             if isinstance(outputs, dict):
-                targets = set(outputs.values())
+                targets = list(outputs.values())
             elif isinstance(outputs, list):
-                targets = set(outputs)
+                targets = outputs
             else:
                 raise ValueError("'outputs' must be a dictionary or list.")
+            cmd.extend(targets)
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout
+        )
+
+        if result.returncode == 0:
+            return {"status": "success", "stdout": result.stdout, "stderr": result.stderr, "exit_code": 0}
         else:
-            targets = set()  # If no outputs specified, run the default target
+            return {"status": "failed", "stdout": result.stdout, "stderr": result.stderr, "exit_code": result.returncode, "error_message": "Snakemake command failed."}
 
-        dag_settings = DAGSettings(targets=targets)  # Use targets in DAG settings
-
-        # Create API instance and workflow in a with statement
-        with SnakemakeApi(output_settings=OutputSettings()) as api:
-            workflow_api = api.workflow(
-                resource_settings=resource_settings,
-                config_settings=config_settings,
-                workflow_settings=workflow_settings,
-                storage_settings=storage_settings,
-                deployment_settings=deployment_settings,
-                snakefile=snakefile_path,
-                workdir=Path.cwd()
-            )
-
-            # Create DAG
-            dag = workflow_api.dag(
-                dag_settings=dag_settings
-            )
-
-            # Execute the workflow
-            success = dag.execute_workflow(
-                execution_settings=execution_settings,
-                scheduling_settings=scheduling_settings
-            )
-
-        final_stdout = stdout_capture.getvalue()
-        final_stderr = stderr_capture.getvalue()
-
-        if success:
-            return {"status": "success", "stdout": final_stdout, "stderr": final_stderr, "exit_code": 0}
-        else:
-            return {"status": "failed", "stdout": final_stdout, "stderr": final_stderr, "exit_code": 1, "error_message": "Workflow execution failed."}
-
+    except subprocess.TimeoutExpired as e:
+        return {"status": "failed", "stdout": e.stdout or "", "stderr": e.stderr or "", "exit_code": -1, "error_message": f"Execution timed out after {timeout} seconds."}
     except Exception as e:
-        stderr_val = stderr_capture.getvalue()
         import traceback
         exc_buffer = StringIO()
         traceback.print_exception(type(e), e, e.__traceback__, file=exc_buffer)
-        stderr_val += exc_buffer.getvalue()
-        return {"status": "failed", "stdout": stdout_capture.getvalue(), "stderr": stderr_val, "exit_code": -1, "error_message": str(e)}
+        return {"status": "failed", "stdout": "", "stderr": exc_buffer.getvalue(), "exit_code": -1, "error_message": str(e)}
     finally:
         os.chdir(original_cwd)
         # Clean up the temporary snakefile

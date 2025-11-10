@@ -110,10 +110,11 @@ async def run_wrapper(
             "--snakefile", str(snakefile_path),
             "--cores", str(threads),
             "--nocolor",
-            "--forceall"  # Force execution since we are in a temp/isolated context
+            "--forceall",  # Force execution since we are in a temp/isolated context
+            "--wrapper-prefix", str(abs_wrappers_path) + os.sep # Add wrapper prefix with trailing slash
         ]
 
-        if conda_env:
+        if conda_env and conda_env.strip(): # Check if not empty or just whitespace
             cmd_list.append("--use-conda")
 
         # Add targets if they exist
@@ -142,6 +143,9 @@ async def run_wrapper(
 
         stdout = stdout_bytes.decode()
         stderr = stderr_bytes.decode()
+
+        logger.debug(f"Snakemake stdout:\n{stdout}")
+        logger.debug(f"Snakemake stderr:\n{stderr}")
 
         if process.returncode == 0:
             return {"status": "success", "stdout": stdout, "stderr": stderr, "exit_code": 0}
@@ -274,8 +278,8 @@ def _generate_wrapper_snakefile(
         rule_parts.append(f"    # env_modules: {env_modules}")
     
     # Wrapper
-    wrapper_path = Path(wrappers_path) / wrapper_name
-    rule_parts.append(f'    wrapper: "{wrapper_path.resolve()}"')
+    wrapper_full_path = Path(wrappers_path) / wrapper_name
+    rule_parts.append(f'    wrapper: "file://{wrapper_full_path.resolve()}"')
     
     rule_parts.append("")  # Empty line to end the rule
     

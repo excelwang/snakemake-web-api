@@ -87,6 +87,82 @@ def cli(ctx, snakebase_dir):
     ctx.obj['WORKFLOWS_DIR'] = workflows_dir
 
 
+@cli.command(
+    help="Parse all wrappers and cache the metadata to JSON files for faster server startup."
+)
+@click.pass_context
+def parse(ctx):
+    """Parses all wrapper metadata and caches it."""
+    import json
+    import yaml
+    from .snakefile_parser import generate_demo_calls_for_wrapper
+    from .fastapi_app import WrapperMetadata, DemoCall
+
+    wrappers_path_str = ctx.obj['WRAPPERS_PATH']
+    wrappers_path = Path(wrappers_path_str)
+    cache_dir = wrappers_path / ".parser"
+    
+    click.echo(f"Starting parser cache generation for wrappers in: {wrappers_path}")
+    
+    # Create or clear the cache directory
+    if cache_dir.exists():
+        import shutil
+        shutil.rmtree(cache_dir)
+        click.echo(f"Cleared existing cache directory: {cache_dir}")
+    cache_dir.mkdir()
+
+    wrapper_count = 0
+    for root, dirs, files in os.walk(wrappers_path):
+        # Skip hidden directories, including the cache dir itself
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        
+        if "meta.yaml" in files:
+            wrapper_count += 1
+            meta_file_path = os.path.join(root, "meta.yaml")
+            click.echo(f"Parsing wrapper {wrapper_count}: {os.path.relpath(root, wrappers_path)}")
+            
+            try:
+                with open(meta_file_path, 'r', encoding='utf-8') as f:
+                    meta_data = yaml.safe_load(f)
+                
+                wrapper_rel_path = os.path.relpath(root, wrappers_path)
+                
+                notes_data = meta_data.get('notes')
+                if isinstance(notes_data, str):
+                    notes_data = [line.strip() for line in notes_data.split('\n') if line.strip()]
+
+                basic_demo_calls = generate_demo_calls_for_wrapper(root)
+                enhanced_demos = [
+                    DemoCall(method='POST', endpoint='/tool-processes', payload=call)
+                    for call in basic_demo_calls
+                ] if basic_demo_calls else None
+                
+                wrapper_meta = WrapperMetadata(
+                    name=meta_data.get('name', os.path.basename(root)),
+                    description=meta_data.get('description'),
+                    url=meta_data.get('url'),
+                    authors=meta_data.get('authors'),
+                    input=meta_data.get('input'),
+                    output=meta_data.get('output'),
+                    params=meta_data.get('params'),
+                    notes=notes_data,
+                    path=wrapper_rel_path,
+                    demos=enhanced_demos
+                )
+                
+                # Save to cache
+                cache_file_path = cache_dir / f"{wrapper_rel_path}.json"
+                cache_file_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(cache_file_path, 'w') as f:
+                    # Use .model_dump(mode="json") for Pydantic v2
+                    json.dump(wrapper_meta.model_dump(mode="json"), f, indent=2)
+
+            except Exception as e:
+                click.echo(f"  [ERROR] Failed to parse or cache {os.path.relpath(root, wrappers_path)}: {e}", err=True)
+
+    click.echo(f"\nSuccessfully parsed and cached {wrapper_count} wrappers in {cache_dir}")
+
+
 # Note: The original direct MCP server is no longer supported as we're using the FastAPI-first approach
 # Only the two new command variants are available: rest and mcp
 

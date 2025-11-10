@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Union, Dict, List, Optional
 from io import StringIO
 from contextlib import redirect_stdout, redirect_stderr
+import asyncio
 
 logger = logging.getLogger(__name__)
 
-def run_wrapper(
+async def run_wrapper(
     # Align with Snakemake Rule properties
     wrapper_name: str,
     wrappers_path: str,
@@ -32,12 +33,11 @@ def run_wrapper(
 ) -> Dict:
     """
     Executes a single Snakemake wrapper by generating a Snakefile and running
-    Snakemake via the command line, which is more robust than the Python API.
+    Snakemake via the command line in a non-blocking, asynchronous manner.
     """
-    original_cwd = os.getcwd()
     snakefile_path = None  # Initialize to ensure it's available in finally block
 
-    # Defensively resolve wrappers_path to an absolute path BEFORE changing directory.
+    # Defensively resolve wrappers_path to an absolute path.
     abs_wrappers_path = Path(wrappers_path).resolve()
 
     try:
@@ -46,7 +46,21 @@ def run_wrapper(
             return {"status": "failed", "stdout": "", "stderr": "A valid 'workdir' must be provided for execution.", "exit_code": -1, "error_message": "Missing or invalid workdir."}
 
         execution_workdir = Path(workdir).resolve()
-        os.chdir(execution_workdir)
+
+        # Pre-emptively create log directories to handle buggy wrappers
+        if log:
+            log_files = []
+            if isinstance(log, dict):
+                log_files.extend(log.values())
+            elif isinstance(log, list):
+                log_files.extend(log)
+            
+            for log_file in log_files:
+                # Paths in the payload are relative to the workdir
+                full_log_path = execution_workdir / log_file
+                log_dir = full_log_path.parent
+                if log_dir:
+                    log_dir.mkdir(parents=True, exist_ok=True)
 
         # 2. Generate temporary Snakefile with a unique name in the workdir
         import tempfile
@@ -72,10 +86,23 @@ def run_wrapper(
             )
             tmp_snakefile.write(snakefile_content)
 
-        # 3. Build and run Snakemake command using subprocess
-        import subprocess
+        # 3. Build and run Snakemake command using asyncio.subprocess
+        
+        # Attempt to unlock the directory first to clear any stale locks
+        unlock_cmd = [
+            "snakemake",
+            "--snakefile", str(snakefile_path),
+            "--unlock"
+        ]
+        unlock_proc = await asyncio.create_subprocess_exec(
+            *unlock_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=execution_workdir
+        )
+        await unlock_proc.wait()
 
-        cmd = [
+        cmd_list = [
             "snakemake",
             "--snakefile", str(snakefile_path),
             "--cores", str(threads),
@@ -92,30 +119,36 @@ def run_wrapper(
                 targets = outputs
             else:
                 raise ValueError("'outputs' must be a dictionary or list.")
-            cmd.extend(targets)
+            cmd_list.extend(targets)
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout
+        process = await asyncio.create_subprocess_exec(
+            *cmd_list,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=execution_workdir
         )
 
-        if result.returncode == 0:
-            return {"status": "success", "stdout": result.stdout, "stderr": result.stderr, "exit_code": 0}
-        else:
-            return {"status": "failed", "stdout": result.stdout, "stderr": result.stderr, "exit_code": result.returncode, "error_message": "Snakemake command failed."}
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            return {"status": "failed", "stdout": "", "stderr": f"Execution timed out after {timeout} seconds.", "exit_code": -1, "error_message": f"Execution timed out after {timeout} seconds."}
 
-    except subprocess.TimeoutExpired as e:
-        return {"status": "failed", "stdout": e.stdout or "", "stderr": e.stderr or "", "exit_code": -1, "error_message": f"Execution timed out after {timeout} seconds."}
+        stdout = stdout_bytes.decode()
+        stderr = stderr_bytes.decode()
+
+        if process.returncode == 0:
+            return {"status": "success", "stdout": stdout, "stderr": stderr, "exit_code": 0}
+        else:
+            return {"status": "failed", "stdout": stdout, "stderr": stderr, "exit_code": process.returncode, "error_message": "Snakemake command failed."}
+
     except Exception as e:
         import traceback
         exc_buffer = StringIO()
         traceback.print_exception(type(e), e, e.__traceback__, file=exc_buffer)
         return {"status": "failed", "stdout": "", "stderr": exc_buffer.getvalue(), "exit_code": -1, "error_message": str(e)}
     finally:
-        os.chdir(original_cwd)
         # Clean up the temporary snakefile
         if snakefile_path and os.path.exists(snakefile_path):
             try:

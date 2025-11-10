@@ -73,7 +73,8 @@ def parse_snakefile_with_api(snakefile_path: str) -> List[Dict[str, Any]]:
         deployment_settings = DeploymentSettings()
 
         # Create API instance and workflow in a with statement
-        with SnakemakeApi(output_settings=OutputSettings()) as api:
+        output_settings = OutputSettings(quiet=True)
+        with SnakemakeApi(output_settings=output_settings) as api:
             workflow_api = api.workflow(
                 resource_settings=resource_settings,
                 config_settings=config_settings,

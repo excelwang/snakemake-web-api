@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Response, status
 from pydantic import BaseModel
 from typing import Union, Dict, List, Optional, Any
 import asyncio
@@ -8,6 +8,34 @@ import yaml
 from pathlib import Path
 from .wrapper_runner import run_wrapper
 from .workflow_runner import run_workflow
+import uuid
+from datetime import datetime
+from enum import Enum
+import json
+
+
+# In-memory store for jobs
+job_store = {}
+
+
+# Define new Pydantic models for async job handling
+class JobStatus(str, Enum):
+    ACCEPTED = "accepted"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class Job(BaseModel):
+    job_id: str
+    status: JobStatus
+    created_time: datetime
+    result: Optional[Dict] = None
+
+
+class JobSubmissionResponse(BaseModel):
+    job_id: str
+    status_url: str
 
 
 # Define Pydantic models for request/response
@@ -76,6 +104,54 @@ class ListWrappersResponse(BaseModel):
     total_count: int
 
 
+async def run_snakemake_job_in_background(job_id: str, request: SnakemakeWrapperRequest, wrappers_path: str):
+    """
+    A wrapper function to run the snakemake job in the background and update job store.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting background job: {job_id}")
+    job_store[job_id].status = JobStatus.RUNNING
+
+    try:
+        result = await run_wrapper(
+            wrapper_name=request.wrapper_name,
+            wrappers_path=wrappers_path,
+            inputs=request.inputs,
+            outputs=request.outputs,
+            params=request.params,
+            log=request.log,
+            threads=request.threads,
+            resources=request.resources,
+            priority=request.priority,
+            shadow_depth=request.shadow_depth,
+            benchmark=request.benchmark,
+            conda_env=request.conda_env,
+            container_img=request.container_img,
+            env_modules=request.env_modules,
+            group=request.group,
+            workdir=request.workdir,
+        )
+        
+        job_store[job_id].result = result
+        if result.get("status") == "success":
+            job_store[job_id].status = JobStatus.COMPLETED
+        else:
+            job_store[job_id].status = JobStatus.FAILED
+        
+        logger.info(f"Background job {job_id} finished with status: {job_store[job_id].status}")
+
+    except Exception as e:
+        logger.error(f"Background job {job_id} failed with an exception: {e}")
+        job_store[job_id].status = JobStatus.FAILED
+        job_store[job_id].result = {
+            "status": "failed",
+            "stdout": "",
+            "stderr": str(e),
+            "exit_code": -1,
+            "error_message": "Job execution failed with an unexpected exception."
+        }
+
+
 def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI:
     """
     Create a native FastAPI application with Snakemake functionality.
@@ -93,77 +169,31 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
     
     def load_wrapper_metadata(wrappers_dir: str) -> List[WrapperMetadata]:
         """
-        Load metadata for all available wrappers by scanning meta.yaml files.
-        
-        Args:
-            wrappers_dir: Path to the wrappers directory
-            
-        Returns:
-            List of WrapperMetadata objects
+        Load metadata for all available wrappers from the pre-parsed cache.
         """
-        from .snakefile_parser import generate_demo_calls_for_wrapper
-        import json
-        wrappers = []
-        
-        # Walk through the wrapper directory structure, excluding .snakemake and other hidden directories
-        for root, dirs, files in os.walk(wrappers_dir):
-            # Remove hidden directories (including .snakemake) from dirs to prevent walking into them
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
-            
-            for file in files:
-                if file == "meta.yaml":
-                    meta_file_path = os.path.join(root, file)
-                    try:
-                        with open(meta_file_path, 'r', encoding='utf-8') as f:
-                            meta_data = yaml.safe_load(f)
-                        
-                        # Calculate the relative path from wrappers_dir to get wrapper name
-                        wrapper_path = os.path.relpath(root, wrappers_dir)
-                        
-                        # Handle notes field to ensure it is a list
-                        notes_data = meta_data.get('notes')
-                        if isinstance(notes_data, str):
-                            # Split multi-line string into a list of strings, cleaning each line
-                            notes_data = [line.strip() for line in notes_data.split('\n') if line.strip()]
+        cache_dir = Path(wrappers_dir) / ".parser"
+        if not cache_dir.exists():
+            logger.warning(f"Parser cache directory not found at '{cache_dir}'. No tools will be loaded. Run 'swa parse' to generate the cache.")
+            return []
 
-                        # Generate demo calls
-                        basic_demo_calls = generate_demo_calls_for_wrapper(root)
-                        enhanced_demos = []
-                        if basic_demo_calls:
-                            for basic_demo_call in basic_demo_calls:
-                                enhanced_demo = DemoCall(
-                                    method='POST',
-                                    endpoint='/tool-processes',
-                                    payload=basic_demo_call
-                                )
-                                enhanced_demos.append(enhanced_demo)
-                        
-                        # Create a WrapperMetadata object
-                        wrapper_meta = WrapperMetadata(
-                            name=meta_data.get('name', os.path.basename(root)),
-                            description=meta_data.get('description'),
-                            url=meta_data.get('url'),
-                            authors=meta_data.get('authors'),
-                            input=meta_data.get('input'),
-                            output=meta_data.get('output'),
-                            params=meta_data.get('params'),
-                            notes=notes_data,
-                            path=wrapper_path,
-                            demos=enhanced_demos or None
-                        )
-                        wrappers.append(wrapper_meta)
+        wrappers = []
+        for root, _, files in os.walk(cache_dir):
+            for file in files:
+                if file.endswith(".json"):
+                    try:
+                        with open(os.path.join(root, file), 'r') as f:
+                            data = json.load(f)
+                            wrappers.append(WrapperMetadata(**data))
                     except Exception as e:
-                        logger.warning(f"Could not load meta.yaml from {meta_file_path}: {e}")
-                        continue
-        
+                        logger.error(f"Failed to load cached wrapper from {file}: {e}")
         return wrappers
     
     # Store workflows_dir and wrappers_path in app.state to make them accessible to the endpoints
     app.state.wrappers_path = wrappers_path
     app.state.workflows_dir = workflows_dir
     
-    @app.post("/tool-processes", response_model=SnakemakeResponse, operation_id="tool_process")
-    async def tool_process_endpoint(request: SnakemakeWrapperRequest):
+    @app.post("/tool-processes", response_model=JobSubmissionResponse, status_code=status.HTTP_202_ACCEPTED, operation_id="tool_process")
+    async def tool_process_endpoint(request: SnakemakeWrapperRequest, background_tasks: BackgroundTasks, response: Response):
         """
         Process a Snakemake tool by name and returns the result.
         """
@@ -172,38 +202,25 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
         if not request.wrapper_name:
             raise HTTPException(status_code=400, detail="'wrapper_name' must be provided for tool execution.")
 
-        logger.info(f"Processing tool request: {request.wrapper_name}")
+        job_id = str(uuid.uuid4())
+        job = Job(job_id=job_id, status=JobStatus.ACCEPTED, created_time=datetime.utcnow())
+        job_store[job_id] = job
+
+        background_tasks.add_task(run_snakemake_job_in_background, job_id, request, app.state.wrappers_path)
         
-        try:
-            # Run in thread to avoid blocking
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: run_wrapper(
-                    wrapper_name=request.wrapper_name,
-                    wrappers_path=app.state.wrappers_path,
-                    inputs=request.inputs,
-                    outputs=request.outputs,
-                    params=request.params,
-                    log=request.log,
-                    threads=request.threads,
-                    resources=request.resources,
-                    priority=request.priority,
-                    shadow_depth=request.shadow_depth,
-                    benchmark=request.benchmark,
-                    conda_env=request.conda_env,
-                    container_img=request.container_img,
-                    env_modules=request.env_modules,
-                    group=request.group,
-                    workdir=request.workdir,
-                )
-            )
-            
-            logger.info(f"Tool execution completed with status: {result['status']}")
-            return result
-                
-        except Exception as e:
-            logger.error(f"Error executing tool '{request.wrapper_name}': {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+        status_url = f"/tool-processes/{job_id}"
+        response.headers["Location"] = status_url
+        return JobSubmissionResponse(job_id=job_id, status_url=status_url)
+
+    @app.get("/tool-processes/{job_id}", response_model=Job, operation_id="get_tool_process_status")
+    async def get_job_status(job_id: str):
+        """
+        Get the status of a submitted Snakemake tool job.
+        """
+        job = job_store.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
 
     @app.post("/workflow-processes", response_model=SnakemakeResponse, operation_id="workflow_process")
     async def workflow_process_endpoint(request: SnakemakeWorkflowRequest):
@@ -254,103 +271,44 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
     @app.get("/tools", response_model=ListWrappersResponse, operation_id="list_tools")
     async def get_tools():
         """
-        Get all available tools with their metadata from meta.yaml files.
+        Get all available tools with their metadata from the pre-parsed cache.
         """
-        logger.info("Received request to get tools")
+        logger.info("Received request to get tools from cache")
         
         try:
-            # Load tool metadata - need to pass the path that was used to create the app
-            # Since we use closure variables now, we just pass the wrappers_path variable
             wrappers = load_wrapper_metadata(wrappers_path)
-            
-            logger.info(f"Found {len(wrappers)} tools")
+            logger.info(f"Found {len(wrappers)} tools in cache")
             
             return ListWrappersResponse(
                 wrappers=wrappers,
                 total_count=len(wrappers)
             )
         except Exception as e:
-            logger.error(f"Error getting tools: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error getting tools: {str(e)}")
+            logger.error(f"Error getting tools from cache: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error getting tools from cache: {str(e)}")
 
-    # Import the snakefile parser utility for demo generation
-    from .snakefile_parser import generate_demo_calls_for_wrapper
-    
     @app.get("/tools/{tool_path:path}", response_model=WrapperMetadata, operation_id="get_tool_meta")
     async def get_tool_meta(tool_path: str):
         """
-        Get metadata for a specific tool by its path.
-        
-        Args:
-            tool_path: The relative path of the tool (e.g., "bio/samtools/faidx")
+        Get metadata for a specific tool by its path from the pre-parsed cache.
         """
-        logger.info(f"Received request to get metadata for tool: {tool_path}")
+        logger.info(f"Received request to get metadata for tool from cache: {tool_path}")
+        
+        cache_file = Path(wrappers_path) / ".parser" / f"{tool_path}.json"
+
+        if not cache_file.exists():
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Tool metadata cache not found for: {tool_path}. Run 'swa parse' to generate it."
+            )
         
         try:
-            # Sanitize the path to prevent directory traversal
-            if tool_path.startswith('/') or tool_path.startswith('..'):
-                raise HTTPException(status_code=400, detail="Invalid tool path")
-            
-            # Build the full path by joining with the wrappers_path
-            full_path = os.path.join(wrappers_path, tool_path)
-            
-            # Check if the directory exists
-            if not os.path.exists(full_path) or not os.path.isdir(full_path):
-                raise HTTPException(status_code=404, detail=f"Tool not found: {tool_path}")
-            
-            # Look for meta.yaml in the tool directory
-            meta_file_path = os.path.join(full_path, "meta.yaml")
-            if not os.path.exists(meta_file_path):
-                raise HTTPException(status_code=404, detail=f"Meta file not found for tool: {tool_path}")
-            
-            # Load and return the metadata
-            with open(meta_file_path, 'r', encoding='utf-8') as f:
-                meta_data = yaml.safe_load(f)
-            
-            # Generate demo calls from the test Snakefile (returns basic API call structures)
-            basic_demo_calls = generate_demo_calls_for_wrapper(full_path)
-            
-            # Enhance each demo call to include API method and endpoint information
-            import json
-            enhanced_demos = []
-            for basic_demo_call in basic_demo_calls:
-                # Create DemoCall objects to ensure FastMCP properly recognizes them
-                enhanced_demo = DemoCall(
-                    method='POST',
-                    endpoint='/tool-processes',
-                    payload=basic_demo_call,  # This contains just the API parameters for tool-processes
-                )
-                enhanced_demos.append(enhanced_demo)
-            
-            # Handle notes field to ensure it is a list
-            notes_data = meta_data.get('notes')
-            if isinstance(notes_data, str):
-                # Split multi-line string into a list of strings, cleaning each line
-                notes_data = [line.strip() for line in notes_data.split('\n') if line.strip()]
-            
-            # Create and return the WrapperMetadata object
-            wrapper_meta = WrapperMetadata(
-                name=meta_data.get('name', os.path.basename(full_path)),
-                description=meta_data.get('description'),
-                url=meta_data.get('url'),
-                authors=meta_data.get('authors'),
-                input=meta_data.get('input'),
-                output=meta_data.get('output'),
-                params=meta_data.get('params'),
-                notes=notes_data,
-                path=tool_path,
-                demos=enhanced_demos
-            )
-            
-            logger.info(f"Successfully retrieved metadata for tool: {tool_path} with {len(enhanced_demos)} demo calls")
-            return wrapper_meta
-            
-        except HTTPException:
-            raise
+            with open(cache_file, 'r') as f:
+                data = json.load(f)
+            return WrapperMetadata(**data)
         except Exception as e:
-            logger.error(f"Error getting tool metadata for {tool_path}: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error getting tool metadata: {str(e)}")
-
-
+            logger.error(f"Error loading cached metadata for {tool_path}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error loading cached metadata: {str(e)}")
 
     return app
+

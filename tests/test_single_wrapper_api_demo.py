@@ -47,11 +47,12 @@ def rest_client():
 @pytest.mark.asyncio
 async def test_single_demo_api_flow(rest_client):
     """
-    Tests the full asynchronous API flow for the first available wrapper demo.
+    Tests the full asynchronous API flow by finding the first available
+    wrapper that has a valid, executable demo.
     """
     logging.info("Starting single demo API flow test...")
 
-    # 1. Get the first available wrapper
+    # 1. Get the list of all wrappers
     response = rest_client.get("/tools")
     assert response.status_code == 200, "Failed to get wrapper list"
     
@@ -59,24 +60,33 @@ async def test_single_demo_api_flow(rest_client):
     if not wrappers:
         pytest.skip("No wrappers found, skipping single demo API test.")
     
-    first_wrapper = wrappers[0]
-    wrapper_path = first_wrapper.get("path")
-    assert wrapper_path, "First wrapper has no path."
-
-    logging.info(f"Found wrapper: {wrapper_path}. Getting its metadata.")
-
-    # 2. Get the first available demo for that wrapper
-    metadata_response = rest_client.get(f"/tools/{wrapper_path}")
-    assert metadata_response.status_code == 200, f"Failed to get metadata for {wrapper_path}"
+    # 2. Find the first wrapper that has at least one valid demo
+    target_wrapper = None
+    first_demo = None
     
-    demos = metadata_response.json().get("demos", [])
-    if not demos:
-        pytest.skip(f"No demos found for wrapper {wrapper_path}, skipping.")
+    for wrapper_summary in wrappers:
+        wrapper_path = wrapper_summary.get("path")
+        if not wrapper_path:
+            continue
 
-    first_demo = demos[0]
-    logging.info(f"Found demo for {wrapper_path}. Preparing to execute.")
+        logging.info(f"Checking wrapper for demos: {wrapper_path}")
+        metadata_response = rest_client.get(f"/tools/{wrapper_path}")
+        assert metadata_response.status_code == 200, f"Failed to get metadata for {wrapper_path}"
+        
+        metadata = metadata_response.json()
+        demos = metadata.get("demos", [])
+        
+        if demos:
+            target_wrapper = metadata
+            first_demo = demos[0]
+            logging.info(f"Found valid demo for wrapper: {wrapper_path}")
+            break
+
+    if not target_wrapper or not first_demo:
+        pytest.skip("Could not find any wrapper with a valid, executable demo.")
 
     # 3. Prepare and submit the job
+    wrapper_path = target_wrapper.get("path")
     endpoint = first_demo.get("endpoint")
     payload = first_demo.get("payload", {})
     assert endpoint == "/tool-processes", "This test is designed for /tool-processes endpoint."
@@ -101,7 +111,7 @@ async def test_single_demo_api_flow(rest_client):
     status_url = demo_response.json().get("status_url")
     assert status_url, "Response is missing status_url"
     
-    logging.info(f"Job submitted. Polling status at {status_url}")
+    logging.info(f"Job submitted for wrapper {wrapper_path}. Polling status at {status_url}")
 
     # 4. Poll for completion
     final_job_data = None

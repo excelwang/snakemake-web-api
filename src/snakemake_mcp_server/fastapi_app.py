@@ -9,7 +9,7 @@ from pathlib import Path
 from .wrapper_runner import run_wrapper
 from .workflow_runner import run_workflow
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import json
 
@@ -95,8 +95,9 @@ class WrapperMetadata(BaseModel):
     output: Optional[Any] = None
     params: Optional[Any] = None
     notes: Optional[List[str]] = None
-    path: str  # Relative path of the wrapper
-    demos: Optional[List[DemoCall]] = None  # Include demo calls in the metadata
+    path: str
+    demos: Optional[List[DemoCall]] = None
+    demo_count: Optional[int] = 0  # For summary view
 
 
 class ListWrappersResponse(BaseModel):
@@ -155,9 +156,6 @@ async def run_snakemake_job_in_background(job_id: str, request: SnakemakeWrapper
 def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI:
     """
     Create a native FastAPI application with Snakemake functionality.
-    
-    This creates a pure FastAPI app with proper Pydantic models that can later
-    be converted to MCP tools using FastMCP.from_fastapi().
     """
     logger = logging.getLogger(__name__)
     
@@ -188,7 +186,6 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
                         logger.error(f"Failed to load cached wrapper from {file}: {e}")
         return wrappers
     
-    # Store workflows_dir and wrappers_path in app.state to make them accessible to the endpoints
     app.state.wrappers_path = wrappers_path
     app.state.workflows_dir = workflows_dir
     
@@ -203,7 +200,7 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
             raise HTTPException(status_code=400, detail="'wrapper_name' must be provided for tool execution.")
 
         job_id = str(uuid.uuid4())
-        job = Job(job_id=job_id, status=JobStatus.ACCEPTED, created_time=datetime.utcnow())
+        job = Job(job_id=job_id, status=JobStatus.ACCEPTED, created_time=datetime.now(timezone.utc))
         job_store[job_id] = job
 
         background_tasks.add_task(run_snakemake_job_in_background, job_id, request, app.state.wrappers_path)
@@ -235,7 +232,6 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
         logger.info(f"Processing workflow request: {request.workflow_name}")
 
         try:
-            # Run in thread to avoid blocking
             result = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: run_workflow(
@@ -246,13 +242,13 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
                     threads=request.threads,
                     log=request.log,
                     extra_snakemake_args=request.extra_snakemake_args,
-                    workflows_dir=app.state.workflows_dir,  # Use app.state for consistency
+                    workflows_dir=app.state.workflows_dir,
                     container=request.container,
                     benchmark=request.benchmark,
                     resources=request.resources,
                     shadow=request.shadow,
                     target_rule=request.target_rule,
-                    timeout=600  # timeout
+                    timeout=600
                 )
             )
 
@@ -263,7 +259,6 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
             logger.error(f"Error executing workflow '{request.workflow_name}': {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    # Health check endpoint
     @app.get("/health")
     def health_check():
         return {"status": "healthy", "service": "snakemake-native-api"}
@@ -271,14 +266,19 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
     @app.get("/tools", response_model=ListWrappersResponse, operation_id="list_tools")
     async def get_tools():
         """
-        Get all available tools with their metadata from the pre-parsed cache.
+        Get a summary of all available tools from the pre-parsed cache.
         """
         logger.info("Received request to get tools from cache")
         
         try:
             wrappers = load_wrapper_metadata(wrappers_path)
             logger.info(f"Found {len(wrappers)} tools in cache")
-            
+
+            # Create a lightweight summary
+            for wrapper in wrappers:
+                wrapper.demo_count = len(wrapper.demos) if wrapper.demos else 0
+                wrapper.demos = None  # Do not include full demo payload in list view
+
             return ListWrappersResponse(
                 wrappers=wrappers,
                 total_count=len(wrappers)
@@ -290,7 +290,7 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
     @app.get("/tools/{tool_path:path}", response_model=WrapperMetadata, operation_id="get_tool_meta")
     async def get_tool_meta(tool_path: str):
         """
-        Get metadata for a specific tool by its path from the pre-parsed cache.
+        Get full metadata for a specific tool, including demos, from the cache.
         """
         logger.info(f"Received request to get metadata for tool from cache: {tool_path}")
         

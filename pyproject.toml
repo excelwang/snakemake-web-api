@@ -46,7 +46,7 @@ addopts = [
     "-ra",                    # show extra test summary info at end
     "-v",                     # verbose output  
     "--tb=short",             # traceback style
-    "--log-cli-level=INFO",   # show INFO and above level logs in CLI
+    "--log-cli-level=WARNING",   # show INFO and above level logs in CLI
     "--log-cli-format=%(asctime)s [%(levelname)8s] %(name)s: %(message)s", # format for CLI logs
     "--strict-markers",
     "--strict-config"

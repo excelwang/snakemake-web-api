@@ -92,7 +92,7 @@ def cli(ctx, snakebase_dir):
 )
 @click.pass_context
 def parse(ctx):
-    """Parses all wrapper metadata and caches it."""
+    """Parses all wrapper metadata and demos, then caches them."""
     import json
     import yaml
     from .snakefile_parser import generate_demo_calls_for_wrapper
@@ -112,6 +112,7 @@ def parse(ctx):
     cache_dir.mkdir()
 
     wrapper_count = 0
+    demo_count = 0
     for root, dirs, files in os.walk(wrappers_path):
         # Skip hidden directories, including the cache dir itself
         dirs[:] = [d for d in dirs if not d.startswith('.')]
@@ -131,11 +132,16 @@ def parse(ctx):
                 if isinstance(notes_data, str):
                     notes_data = [line.strip() for line in notes_data.split('\n') if line.strip()]
 
+                # Pre-parse demos using the robust DAG-based parser
                 basic_demo_calls = generate_demo_calls_for_wrapper(root)
-                enhanced_demos = [
-                    DemoCall(method='POST', endpoint='/tool-processes', payload=call)
-                    for call in basic_demo_calls
-                ] if basic_demo_calls else None
+                if basic_demo_calls:
+                    demo_count += len(basic_demo_calls)
+                    enhanced_demos = [
+                        DemoCall(method='POST', endpoint='/tool-processes', payload=call)
+                        for call in basic_demo_calls
+                    ]
+                else:
+                    enhanced_demos = None
                 
                 wrapper_meta = WrapperMetadata(
                     name=meta_data.get('name', os.path.basename(root)),
@@ -154,13 +160,12 @@ def parse(ctx):
                 cache_file_path = cache_dir / f"{wrapper_rel_path}.json"
                 cache_file_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(cache_file_path, 'w') as f:
-                    # Use .model_dump(mode="json") for Pydantic v2
                     json.dump(wrapper_meta.model_dump(mode="json"), f, indent=2)
 
             except Exception as e:
                 click.echo(f"  [ERROR] Failed to parse or cache {os.path.relpath(root, wrappers_path)}: {e}", err=True)
 
-    click.echo(f"\nSuccessfully parsed and cached {wrapper_count} wrappers in {cache_dir}")
+    click.echo(f"\nSuccessfully parsed and cached {wrapper_count} wrappers and {demo_count} demos in {cache_dir}")
 
 
 # Note: The original direct MCP server is no longer supported as we're using the FastAPI-first approach

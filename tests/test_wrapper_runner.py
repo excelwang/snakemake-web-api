@@ -24,7 +24,7 @@ def create_dummy_wrapper(tmpdir: Path, wrapper_name: str, content: str):
 
 @pytest.fixture
 def wrappers_path():
-    return SNAKEBASE_DIR
+    return os.path.join(SNAKEBASE_DIR, "snakemake-wrappers")
 
 
 
@@ -64,12 +64,12 @@ async def test_samtools_faidx_self_contained(self_contained_faidx_data, wrappers
     input_file, output_file = self_contained_faidx_data
     
     result = await run_wrapper(
-        wrapper_name="snakemake-wrappers/bio/samtools/faidx",
+        wrapper_name="bio/samtools/faidx",
         inputs=[input_file],
         outputs=[output_file],
         wrappers_path=wrappers_path,
         workdir=os.path.dirname(input_file), # Pass workdir explicitly
-        conda_env=os.path.join(wrappers_path, "snakemake-wrappers/bio/samtools/faidx/environment.yaml")
+        conda_env=os.path.join(wrappers_path, "bio/samtools/faidx/environment.yaml")
     )
     
     assert result["status"] == "success"
@@ -82,11 +82,11 @@ async def test_arriba_local_data(arriba_data, wrappers_path):
     fusions_file, discarded_file = arriba_data
     
     result = await run_wrapper(
-        wrapper_name="snakemake-wrappers/bio/arriba",
+        wrapper_name="bio/arriba",
         inputs={
-            "bam": os.path.join(wrappers_path, "snakemake-wrappers/bio/arriba/test/A.bam"),
-            "genome": os.path.join(wrappers_path, "snakemake-wrappers/bio/arriba/test/genome.fasta"),
-            "annotation": os.path.join(wrappers_path, "snakemake-wrappers/bio/arriba/test/annotation.gtf")
+            "bam": os.path.join(wrappers_path, "bio/arriba/test/A.bam"),
+            "genome": os.path.join(wrappers_path, "bio/arriba/test/genome.fasta"),
+            "annotation": os.path.join(wrappers_path, "bio/arriba/test/annotation.gtf")
         },
         outputs={
             "fusions": fusions_file,
@@ -94,12 +94,12 @@ async def test_arriba_local_data(arriba_data, wrappers_path):
         },
         params={
             "genome_build": "GRCh37",
-            "extra": f"-d {os.path.join(wrappers_path, 'snakemake-wrappers/bio/arriba/test/blacklist.tsv')}"
+            "extra": f"-d {os.path.join(wrappers_path, 'bio/arriba/test/blacklist.tsv')}"
         },
         threads=2,
         wrappers_path=wrappers_path,
         workdir=os.path.dirname(fusions_file), # Pass workdir explicitly
-        conda_env=os.path.join(wrappers_path, "snakemake-wrappers/bio/arriba/environment.yaml")
+        conda_env=os.path.join(wrappers_path, "bio/arriba/environment.yaml")
     )
     
     assert result["status"] == "success"

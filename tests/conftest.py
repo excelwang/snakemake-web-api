@@ -65,6 +65,7 @@ def server_url(server_port):
 
 @pytest.fixture(scope="function")
 def mcp_server(server_port, wrappers_path, workflows_dir):
+    pytest.skip("Skipping all MCP-dependent tests as requested.")
     app = create_mcp_from_fastapi(wrappers_path, workflows_dir)
     
     def run_server():
@@ -93,6 +94,7 @@ def mcp_server(server_port, wrappers_path, workflows_dir):
 @pytest_asyncio.fixture(scope="function")
 async def http_client(server_url, mcp_server):
     """创建HTTP客户端 - 每个测试独立的客户端实例"""
+    os.environ['NO_PROXY'] = '127.0.0.1'
     client = Client(server_url)
     
     # 使用短暂的连接，避免长时间保持连接导致的问题

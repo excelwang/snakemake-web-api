@@ -56,5 +56,6 @@ asyncio_default_fixture_loop_scope = "function"
 markers = [
     "slow: marks tests as slow",
     "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests"
+    "unit: marks tests as unit tests",
+    "mcp: marks tests that rely on the MCP server"
 ]

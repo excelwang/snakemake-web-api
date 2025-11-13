@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Response, status
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Response, status, Request
 from pydantic import BaseModel
 from typing import Union, Dict, List, Optional, Any
 import asyncio
@@ -411,7 +411,7 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
             raise HTTPException(status_code=500, detail=f"Error loading cached metadata: {str(e)}")
 
     @app.get("/demo-case", response_model=DemoCaseResponse, operation_id="get_samtools_faidx_demo_case")
-    async def get_samtools_faidx_demo_case():
+    async def get_samtools_faidx_demo_case(request: Request):
         """
         Provides a demo case for running the 'bio/samtools/faidx' wrapper via the /tool-processes endpoint,
         including the request payload and a curl example.
@@ -437,9 +437,10 @@ def create_native_fastapi_app(wrappers_path: str, workflows_dir: str) -> FastAPI
             curl_example="" # Will be filled below
         )
 
-        # Generate curl example using the user_payload
+        # Generate curl example using the user_payload and dynamic base URL
         payload_json = user_payload.model_dump_json(indent=2)
-        curl_example = f"""curl -X POST "http://localhost:8000/tool-processes" \\
+        base_url_str = str(request.base_url).rstrip('/') # Ensure no trailing slash
+        curl_example = f"""curl -X POST "{base_url_str}/tool-processes" \\
      -H "Content-Type: application/json" \\
      -d '{payload_json}'"""
         

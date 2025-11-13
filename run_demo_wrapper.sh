@@ -40,9 +40,15 @@ echo ""
 
 # --- Step 2: Execute the curl example from /demo-case to submit the job ---
 echo "--- Step 2: Executing the curl example from /demo-case to submit the job ---"
-# The curl_example string already contains the full curl command, including payload and headers.
-# We use 'eval' to execute the string as a command.
-read -r CURL_OUTPUT < <(eval "$CURL_EXAMPLE")
+# Extract the payload directly from the DEMO_CASE_RESPONSE
+DEMO_CASE_PAYLOAD=$(echo "$DEMO_CASE_RESPONSE" | jq -c '.payload')
+
+# Construct the curl command using the API_SERVER_URL and the extracted payload
+CURL_COMMAND="curl -X POST \"$API_SERVER_URL$DEMO_CASE_ENDPOINT\" \
+     -H \"Content-Type: application/json\" \
+     -d '$DEMO_CASE_PAYLOAD'"
+
+read -r CURL_OUTPUT < <(eval "$CURL_COMMAND")
 
 echo "Response from /tool-processes (Job Submission):"
 echo "$CURL_OUTPUT" | jq .

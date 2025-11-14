@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 import logging
 import json
-from snakemake_mcp_server.fastapi_app import create_native_fastapi_app
+from snakemake_mcp_server.api.main import create_native_fastapi_app
 
 @pytest.fixture
 def rest_client():
@@ -21,7 +21,7 @@ async def test_single_demo_api_flow(rest_client):
     logging.info("Starting simplified demo API test...")
 
     # Directly test a wrapper known to have a demo
-    wrapper_path = "bio/bwa/mem"
+    wrapper_path = "bio/samtools/faidx"
     
     # Fetch the full metadata for this specific wrapper
     metadata_response = rest_client.get(f"/tools/{wrapper_path}")

@@ -6,7 +6,7 @@ These tests verify the MCP interface that wraps the FastAPI application.
 import pytest
 import asyncio
 from fastmcp import FastMCP
-from snakemake_mcp_server.fastapi_app import create_native_fastapi_app
+from snakemake_mcp_server.api.main import create_native_fastapi_app
 
 
 # Placeholder tests to validate the test file structure

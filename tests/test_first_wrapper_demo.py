@@ -11,7 +11,7 @@ import os
 import json
 import subprocess
 from pathlib import Path
-from snakemake_mcp_server.fastapi_app import WrapperMetadata
+from snakemake_mcp_server.schemas import WrapperMetadata
 
 
 def ensure_parser_cache_exists(wrappers_path_str: str):

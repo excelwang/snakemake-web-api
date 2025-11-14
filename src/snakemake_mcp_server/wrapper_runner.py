@@ -247,10 +247,9 @@ def _generate_wrapper_snakefile(
     # Params
     if params is not None:
         if isinstance(params, dict):
-            # Format dict with each key-value pair on its own line, indented properly
-            param_lines = [f"    {k}=\"{v}\"" if isinstance(v, str) else f"    {k}={v}" for k, v in params.items()]
-            rule_parts.append(f"    params:")
-            rule_parts.extend(param_lines)
+            # Format dict as keyword arguments on the same params line
+            param_strs = [f'{k}="{v}"' if isinstance(v, str) else f'{k}={v}' for k, v in params.items()]
+            rule_parts.append(f"    params: {', '.join(param_strs)}")
         elif isinstance(params, list):
             # Convert list to Python list representation for use in Snakefile
             rule_parts.append(f"    params: {repr(params)}")

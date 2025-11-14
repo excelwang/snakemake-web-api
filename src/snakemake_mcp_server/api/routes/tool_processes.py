@@ -40,23 +40,8 @@ async def tool_process_endpoint(request: UserSnakemakeWrapperRequest, background
     workdir = str(workdir_path)
     logger.debug(f"Generated workdir: {workdir}")
 
-    # 3. Create dummy input files in the workdir based on request.inputs
-    if request.inputs:
-        if isinstance(request.inputs, list):
-            for input_file_name in request.inputs:
-                # Assuming simple file names for dummy creation
-                dummy_input_path = workdir_path / input_file_name
-                dummy_input_path.parent.mkdir(parents=True, exist_ok=True)
-                # Provide a simple dummy FASTA content for testing samtools faidx
-                dummy_input_path.write_text(">chr1\nAGCTAGCTAGCTAGCT\n>chr2\nTCGATCGATCGA\n")
-                logger.debug(f"Created dummy input file: {dummy_input_path}")
-        # Add handling for dict inputs if necessary, but for now, list is sufficient for demo
-        elif isinstance(request.inputs, dict):
-            for input_file_name in request.inputs.values():
-                dummy_input_path = workdir_path / input_file_name
-                dummy_input_path.parent.mkdir(parents=True, exist_ok=True)
-                dummy_input_path.write_text(">chr1\nAGCTAGCTAGCTAGCT\n>chr2\nTCGATCGATCGA\n")
-                logger.debug(f"Created dummy input file: {dummy_input_path}")
+    # 3. Create dummy input files in the workdir based on request.inputs - REMOVED
+    # The user is responsible for providing valid input files.
 
     # 4. Infer values for hidden parameters from WrapperMetadata or use defaults
     #    Default to None if not found in metadata, as per user's instruction.

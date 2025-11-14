@@ -100,15 +100,28 @@ def verify(ctx, log_level, dry_run, by_api):
                 logger.info(f"    Demo {i+1}: Executing via API...")
                 
                 try:
+                    # Get snakebase_dir from environment
+                    snakebase_dir = os.path.expanduser(os.environ.get("SNAKEBASE_DIR", "~/snakebase"))
+                    wrappers_path = os.path.join(snakebase_dir, "snakemake-wrappers")
+                    demo_workdir = os.path.join(wrappers_path, wrapper.path, "test")
+
                     # Prepare the API payload by using only the fields that are compatible with the API
                     # The API expects: wrapper_name, inputs, outputs, params
                     api_payload = {
                         "wrapper_name": payload.get('wrapper', '').replace('file://', '').replace('master/', ''),
-                        "inputs": payload.get('input', {}),
                         "outputs": payload.get('output', {}),
                         "params": payload.get('params', {})
                     }
-                    
+
+                    # Construct absolute paths for inputs
+                    inputs = payload.get('input', {})
+                    if isinstance(inputs, dict):
+                        api_payload['inputs'] = {k: os.path.join(demo_workdir, v) for k, v in inputs.items()}
+                    elif isinstance(inputs, list):
+                        api_payload['inputs'] = [os.path.join(demo_workdir, v) for v in inputs]
+                    else:
+                        api_payload['inputs'] = inputs
+
                     # Make request to the API endpoint
                     api_url = f"{by_api.rstrip('/')}/tool-processes"
                     

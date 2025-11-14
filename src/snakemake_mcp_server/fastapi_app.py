@@ -62,7 +62,7 @@ class UserSnakemakeWrapperRequest(BaseModel):
     wrapper_name: str
     inputs: Optional[Union[Dict, List]] = None
     outputs: Optional[Union[Dict, List]] = None
-    params: Optional[List] = None
+    params: Optional[Union[Dict, List]] = None
 
 
 class SnakemakeWorkflowRequest(BaseModel):

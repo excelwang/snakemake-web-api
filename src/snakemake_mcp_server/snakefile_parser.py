@@ -176,6 +176,24 @@ def parse_snakefile_with_api(snakefile_path: str) -> Tuple[List[Dict[str, Any]],
         sys.path = original_sys_path
 
 
+def _has_wildcards(data: Any) -> bool:
+    """
+    Recursively check for Snakemake wildcards '{...}' in a data structure.
+    """
+    if isinstance(data, str):
+        if '{' in data and '}' in data:
+            return True
+    elif isinstance(data, dict):
+        for value in data.values():
+            if _has_wildcards(value):
+                return True
+    elif isinstance(data, list):
+        for item in data:
+            if _has_wildcards(item):
+                return True
+    return False
+
+
 def generate_demo_calls_for_wrapper(wrapper_path: str, wrappers_root: str) -> List[Dict[str, Any]]:
     """
     Generate demo calls for a wrapper by analyzing its test Snakefile's DAG
@@ -185,6 +203,18 @@ def generate_demo_calls_for_wrapper(wrapper_path: str, wrappers_root: str) -> Li
     snakefile = test_dir / "Snakefile"
 
     if not snakefile.exists():
+        return []
+
+    # Read the Snakefile content as plain text to check for meta_wrapper directive
+    # This avoids triggering remote calls via Snakemake API if meta_wrapper is present
+    try:
+        with open(snakefile, 'r') as f:
+            snakefile_content = f.read()
+        if "meta_wrapper:" in snakefile_content:
+            logger.debug(f"Skipping demo for wrapper '{wrapper_path}' due to 'meta_wrapper:' directive in {snakefile}")
+            return []
+    except Exception as e:
+        logger.error(f"Error reading {snakefile} to check for meta_wrapper: {e}")
         return []
 
     parsed_rules, leaf_rule_names = parse_snakefile_with_api(str(snakefile))
@@ -214,6 +244,12 @@ def generate_demo_calls_for_wrapper(wrapper_path: str, wrappers_root: str) -> Li
         # a) it's a leaf rule in a DAG, OR
         # b) it's the only rule in a simple Snakefile (which likely has no DAG).
         if is_correct_wrapper and (is_leaf or len(parsed_rules) == 1):
+            # New validation step: check for unresolved wildcards
+            if _has_wildcards(rule_info.get('input', {})) or \
+               _has_wildcards(rule_info.get('output', {})):
+                logger.debug(f"Skipping rule '{rule_info.get('name')}' as a demo because it has unresolved wildcards.")
+                continue
+
             payload = rule_info
             payload['workdir'] = str(test_dir)
             demo_calls.append(payload)

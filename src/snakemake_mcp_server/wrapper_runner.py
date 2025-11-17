@@ -143,7 +143,7 @@ async def run_wrapper(
         # Add targets if they exist
         if outputs:
             if isinstance(outputs, dict):
-                targets = list(outputs.keys())
+                targets = list(outputs.values()) # Reverted: use values as targets
             elif isinstance(outputs, list):
                 targets = outputs
             else:
@@ -222,15 +222,9 @@ def _generate_wrapper_snakefile(
     # Inputs
     if inputs:
         if isinstance(inputs, dict):
-            input_strs = []
-            for k, v in inputs.items():
-                if isinstance(v, list):
-                    # Format list as a string representation of a list
-                    list_str = "[" + ", ".join([f'"{item}"' for item in v]) + "]"
-                    input_strs.append(f'{k}={list_str}')
-                else:
-                    input_strs.append(f'{k}="{v}"')
-            rule_parts.append(f"    input: {', '.join(input_strs)}")
+            rule_parts.append("    input:")
+            input_strs = [f'        {k}="{v}",' for k, v in inputs.items()] # Added comma
+            rule_parts.extend(input_strs)
         elif isinstance(inputs, list):
             input_strs = [f'"{inp}"' for inp in inputs]
             rule_parts.append(f"    input: {', '.join(input_strs)}")
@@ -238,8 +232,9 @@ def _generate_wrapper_snakefile(
     # Outputs
     if outputs:
         if isinstance(outputs, dict):
-            output_strs = [f'{k}="{v}"' for k, v in outputs.items()]
-            rule_parts.append(f"    output: {', '.join(output_strs)}")
+            rule_parts.append("    output:")
+            output_strs = [f'        {k}="{v}",' for k, v in outputs.items()] # Added comma
+            rule_parts.extend(output_strs)
         elif isinstance(outputs, list):
             output_strs = [f'"{out}"' for out in outputs]
             rule_parts.append(f"    output: {', '.join(output_strs)}")
@@ -247,21 +242,20 @@ def _generate_wrapper_snakefile(
     # Params
     if params is not None:
         if isinstance(params, dict):
-            # Format dict as keyword arguments on the same params line
-            param_strs = [f'{k}="{v}"' if isinstance(v, str) else f'{k}={v}' for k, v in params.items()]
-            rule_parts.append(f"    params: {', '.join(param_strs)}")
+            rule_parts.append("    params:")
+            param_strs = [f'        {k}="{v}",' if isinstance(v, str) else f'        {k}={v},' for k, v in params.items()] # Added comma
+            rule_parts.extend(param_strs)
         elif isinstance(params, list):
-            # Convert list to Python list representation for use in Snakefile
             rule_parts.append(f"    params: {repr(params)}")
         else:
-            # For other types or single values
             rule_parts.append(f"    params: {repr(params)}")
     
     # Log
     if log:
         if isinstance(log, dict):
-            log_strs = [f'{k}="{v}"' for k, v in log.items()]
-            rule_parts.append(f"    log: {', '.join(log_strs)}")
+            rule_parts.append("    log:")
+            log_strs = [f'        {k}="{v}",' for k, v in log.items()] # Added comma
+            rule_parts.extend(log_strs)
         elif isinstance(log, list):
             log_strs = [f'"{lg}"' for lg in log]
             rule_parts.append(f"    log: {', '.join(log_strs)}")
@@ -272,20 +266,14 @@ def _generate_wrapper_snakefile(
     
     # Resources
     if resources:
-        # Filter out callable values and handle them specially
+        rule_parts.append("    resources:")
         processed_resources = []
         for k, v in resources.items():
-            if callable(v):
-                # Skip callable resources or assign a default value
-                # For tmpdir and other callable resources, we'll skip them
-                continue
-            elif isinstance(v, str) and v == "<callable>":
-                # Skip resources that were converted to <callable> string
+            if callable(v) or (isinstance(v, str) and v == "<callable>"):
                 continue
             else:
-                processed_resources.append(f'{k}={v}')
-        if processed_resources:
-            rule_parts.append(f"    resources: {', '.join(processed_resources)}")
+                processed_resources.append(f'        {k}={v},') # Added comma
+        rule_parts.extend(processed_resources)
     
     # Priority
     if priority is not None:
@@ -313,7 +301,6 @@ def _generate_wrapper_snakefile(
     
     # Environment modules
     if env_modules:
-        # This is a simplified approach - in real usage, env_modules are complex
         rule_parts.append(f"    # env_modules: {env_modules}")
     
     # Wrapper
@@ -323,3 +310,4 @@ def _generate_wrapper_snakefile(
     
     snakefile_content = "\n".join(rule_parts)
     return snakefile_content
+

@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Union, Dict, List, Optional
 from .wrapper_runner import run_wrapper
-from .utils import setup_demo_workdir
+# from .utils import setup_demo_workdir # No longer needed
 
 logger = logging.getLogger(__name__)
 
@@ -49,20 +49,27 @@ async def run_demo(
         Dictionary with execution result
     """
     
-    temp_workdir = None
+    temp_symlink_dir = None
     workdir_to_use = custom_workdir
     
     try:
-        # Use custom workdir or create a temporary one
+        if not demo_workdir:
+            return {"status": "failed", "stdout": "", "stderr": "demo_workdir must be provided.", "exit_code": -1, "error_message": "demo_workdir not provided."}
+
+        # If no custom workdir, create a temporary directory and symlink demo_workdir into it
         if not workdir_to_use:
-            temp_workdir = tempfile.mkdtemp()
-            workdir_to_use = temp_workdir
+            temp_symlink_dir = tempfile.mkdtemp()
+            # Create a symlink inside the temporary directory pointing to the actual demo_workdir
+            # This allows Snakemake to operate as if it's in the demo_workdir,
+            # but within a temporary, cleanable context.
+            symlink_target_name = Path(demo_workdir).name
+            os.symlink(demo_workdir, Path(temp_symlink_dir) / symlink_target_name, target_is_directory=True)
+            workdir_to_use = Path(temp_symlink_dir) / symlink_target_name
         else:
             workdir_to_use = Path(workdir_to_use).resolve()
             os.makedirs(workdir_to_use, exist_ok=True)
-        
-        # Use the shared utility to copy input files from demo workdir
-        setup_demo_workdir(demo_workdir=demo_workdir, workdir=workdir_to_use)
+            # If custom_workdir is provided, we assume it's already set up or will be set up externally.
+            # For now, we'll just ensure it exists.
         
         # Execute the wrapper in the prepared workdir
         result = await run_wrapper(
@@ -86,8 +93,8 @@ async def run_demo(
         return result
     finally:
         # Clean up temporary directory if we created one
-        if temp_workdir and os.path.exists(temp_workdir):
+        if temp_symlink_dir and os.path.exists(temp_symlink_dir):
             try:
-                shutil.rmtree(temp_workdir)
+                shutil.rmtree(temp_symlink_dir)
             except Exception as e:
-                logger.warning(f"Could not remove temporary workdir {temp_workdir}: {e}")
+                logger.warning(f"Could not remove temporary symlink directory {temp_symlink_dir}: {e}")

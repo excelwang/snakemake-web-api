@@ -45,8 +45,13 @@ def _value_serializer(val: Any) -> Any:
             logger.debug("  Params object doesn't have _get_names method, falling back to string representation")
             return str(val)
 
+    # Explicitly handle Snakemake's IOFile objects (the items within InputFiles/OutputFiles)
+    if hasattr(val, 'is_directory') and not hasattr(val, '_names'):
+        if val.is_directory:
+            return {'path': str(val), 'is_directory': True}
+        return str(val)
+
     # Explicitly handle Snakemake's Namedlist objects (InputFiles, OutputFiles, Wildcards)
-    # This is more robust than relying on _plainstrings()
     if hasattr(val, '_names') and val._names:
         logger.debug(f"Serializing Namedlist with names: {val._names}")
         # It has named items, serialize as a dictionary

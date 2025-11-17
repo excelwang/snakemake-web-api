@@ -5,7 +5,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 import click
 import requests
 from ..schemas import WrapperMetadata
@@ -42,8 +42,9 @@ def _save_verify_cache(cache_path: Path, cache: Dict):
 @click.option("--fast-fail", is_flag=True, help="Exit immediately on the first failed demo.")
 @click.option("--force", is_flag=True, help="Re-run all demos, even those that previously succeeded.")
 @click.option("--no-cache", is_flag=True, help="Disable reading from and writing to the cache for this run.")
+@click.option("--include", multiple=True, help="Specify a wrapper to include in the verification. Can be used multiple times.")
 @click.pass_context
-def verify(ctx, log_level, dry_run, by_api, fast_fail, force, no_cache):
+def verify(ctx, log_level, dry_run, by_api, fast_fail, force, no_cache, include):
     """Verify all cached wrapper demos by executing them with appropriate test data."""
     # Reconfigure logging to respect the user's choice
     logging.basicConfig(
@@ -76,19 +77,27 @@ def verify(ctx, log_level, dry_run, by_api, fast_fail, force, no_cache):
         verify_cache = {} # Ignore existing cache by starting with a fresh one
 
     # Load all cached wrapper metadata
-    wrappers = []
+    all_wrappers = []
     for root, _, files in os.walk(cache_dir):
         for file in files:
             if file.endswith(".json"):
                 try:
                     with open(os.path.join(root, file), 'r') as f:
                         data = json.load(f)
-                        wrappers.append(WrapperMetadata(**data))
+                        all_wrappers.append(WrapperMetadata(**data))
                 except Exception as e:
                     logger.error(f"Failed to load cached wrapper from {file}: {e}")
                     continue
+    
+    # Filter wrappers if --include is used
+    if include:
+        include_set = set(include)
+        wrappers = [w for w in all_wrappers if w.path in include_set]
+        logger.info(f"Filtered to {len(wrappers)} wrappers based on --include option.")
+    else:
+        wrappers = all_wrappers
 
-    logger.info(f"Found {len(wrappers)} cached wrappers with metadata.")
+    logger.info(f"Found {len(wrappers)} cached wrappers with metadata to verify.")
 
     # Count total demos
     total_demos = 0
@@ -97,7 +106,7 @@ def verify(ctx, log_level, dry_run, by_api, fast_fail, force, no_cache):
             total_demos += len(wrapper.demos)
 
     if total_demos == 0:
-        logger.warning("No demos found in cached wrapper metadata.")
+        logger.warning("No demos found for the selected wrappers.")
         return
 
     logger.info(f"Found {total_demos} demos to verify.")

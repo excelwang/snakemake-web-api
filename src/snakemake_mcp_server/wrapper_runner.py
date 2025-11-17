@@ -142,15 +142,22 @@ async def run_wrapper(
 
         # Add targets if they exist
         if outputs:
+            targets = []
+            output_values = []
             if isinstance(outputs, dict):
-                targets = list(outputs.values()) # Reverted: use values as targets
+                output_values = list(outputs.values())
             elif isinstance(outputs, list):
-                targets = outputs
-            else:
-                raise ValueError("'outputs' must be a dictionary or list.")
+                output_values = outputs
+            
+            for item in output_values:
+                if isinstance(item, dict) and item.get('is_directory'):
+                    targets.append(item.get('path'))
+                else:
+                    targets.append(str(item))
+            
             cmd_list.extend(targets)
 
-        logger.debug(f"Snakemake command list: {cmd_list}") # This is the line I moved
+        logger.debug(f"Snakemake command list: {cmd_list}")
         process = await asyncio.create_subprocess_exec(
             *cmd_list,
             stdout=asyncio.subprocess.PIPE,
@@ -233,11 +240,25 @@ def _generate_wrapper_snakefile(
     if outputs:
         if isinstance(outputs, dict):
             rule_parts.append("    output:")
-            output_strs = [f'        {k}="{v}",' for k, v in outputs.items()] # Added comma
+            output_strs = []
+            for k, v in outputs.items():
+                if isinstance(v, dict) and v.get('is_directory'):
+                    path = v.get('path')
+                    output_strs.append(f'        {k}=directory("{path}"),')
+                else:
+                    output_strs.append(f'        {k}="{v}",')
             rule_parts.extend(output_strs)
         elif isinstance(outputs, list):
-            output_strs = [f'"{out}"' for out in outputs]
+            # This branch might need similar logic if unnamed outputs can be directories
+            output_strs = []
+            for out in outputs:
+                if isinstance(out, dict) and out.get('is_directory'):
+                    path = out.get('path')
+                    output_strs.append(f'directory("{path}")')
+                else:
+                    output_strs.append(f'"{out}"')
             rule_parts.append(f"    output: {', '.join(output_strs)}")
+
     
     # Params
     if params is not None:

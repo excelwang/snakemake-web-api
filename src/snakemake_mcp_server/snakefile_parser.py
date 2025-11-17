@@ -54,13 +54,15 @@ def _value_serializer(val: Any) -> Any:
         return "<callable>"
     if isinstance(val, (str, int, float, bool)) or val is None:
         return val
-    if isinstance(val, (list, set, tuple)):
-        return [_value_serializer(v) for v in val]
+    # Special handling for Snakemake's Namedlist objects (like InputFiles/OutputFiles)
+    # must come BEFORE the generic list/tuple check.
     if hasattr(val, '_plainstrings'):
         try:
             return val._plainstrings()
         except:
             return str(val)
+    if isinstance(val, (list, set, tuple)):
+        return [_value_serializer(v) for v in val]
 
     if isinstance(val, dict) or hasattr(val, 'items'):
         try:

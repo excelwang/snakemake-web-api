@@ -143,7 +143,7 @@ async def run_wrapper(
         # Add targets if they exist
         if outputs:
             if isinstance(outputs, dict):
-                targets = list(outputs.values())
+                targets = list(outputs.keys())
             elif isinstance(outputs, list):
                 targets = outputs
             else:

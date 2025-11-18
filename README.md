@@ -1,58 +1,50 @@
-# Snakemake MCP Server
+# Snakemake Web API
 
-The Snakemake MCP (Model Context Protocol) Server provides a robust API endpoint for remotely executing Snakemake wrappers and full Snakemake workflows. This allows for flexible integration of Snakemake-based bioinformatics pipelines into larger systems or applications.
+The Snakemake Web API provides robust endpoints for remotely executing Snakemake wrappers and full Snakemake workflows. This allows for flexible integration of Snakemake-based bioinformatics pipelines into larger systems or applications. The API is available both as a traditional REST API and as an MCP (Model Context Protocol) server.
 
 ## Key Features
 
+*   **Dual API Support:** Both REST API and MCP (Model Context Protocol) endpoints are available for maximum flexibility.
 *   **`run_snakemake_wrapper` Tool:** Execute individual Snakemake wrappers by name. This is ideal for running specific bioinformatics tools wrapped for Snakemake.
 *   **`run_snakemake_workflow` Tool:** Execute entire Snakemake workflows. This enables running complex, multi-step pipelines remotely.
-*   **Flexible Parameter Passing:** Both tools accept common Snakemake parameters such as `inputs`, `outputs`, `params`, `threads`, `log`, `extra_snakemake_args`, `container`, `benchmark`, `resources`, `shadow`, `conda_env` (only for wrapper), and `target_rule` (for workflows).
+*   **Flexible Parameter Passing:** Both tools accept common Snakemake parameters such as `inputs`, `outputs`, `params`, `threads`, `log`, `extra_snakemake_args`, `container`, `benchmark`, `resources`, `shadow`, and `target_rule`.
 *   **Dynamic Config Modification (for Workflows):** The `run_snakemake_workflow` tool can dynamically modify a workflow's `config.yaml` based on parameters provided in the API call, allowing for on-the-fly customization of workflow execution.
-*   **Conda Environment Management:** Seamless integration with Conda environments via the `conda_env` parameter, ensuring reproducible and isolated execution environments.
+*   **Async Job Processing:** Asynchronous job submission and status checking with support for long-running tasks.
+*   **Conda Environment Management:** Seamless integration with Conda environments, ensuring reproducible and isolated execution environments.
 
-## Tool Parameters
+## Installation
 
-This section details the parameters for the two main tools provided by the server.
+### Prerequisites
 
-### `run_snakemake_wrapper`
+* Install `uv` package manager from [https://github.com/astral-sh/uv](https://github.com/astral-sh/uv)
+* Ensure you have Python 3.12+ installed
 
-This tool executes a single Snakemake wrapper.
+### Installation Steps
 
-*   `wrapper_name` (str, required): The name of the wrapper to execute, relative to the `bio` directory in the `snakemake-wrappers` repository (e.g., `"samtools/faidx"`).
-*   `inputs` (dict or list, optional): Input files for the wrapper. Can be a list of paths or a dictionary mapping input names to paths.
-*   `outputs` (dict or list, optional): Output files for the wrapper. Can be a list of paths or a dictionary mapping output names to paths.
-*   `params` (dict, optional): Parameters for the wrapper. Corresponds to the `params` section in a Snakemake rule.
-*   `threads` (int, optional, default: 1): Number of threads to allocate to the wrapper.
-*   `log` (dict or list, optional): Log file paths.
-*   `extra_snakemake_args` (str, optional): A string of extra arguments to pass to the `snakemake` command.
-*   `container` (str, optional): Path to a container image (e.g., Singularity) to use for the wrapper execution.
-*   `benchmark` (str, optional): Path to a file where benchmarking results will be written.
-*   `resources` (dict, optional): A dictionary of resources to allocate to the job (e.g., `{"mem_mb": 1024}`).
-*   `shadow` (str, optional): The shadow mode to use for the job (e.g., `"minimal"`).
-*   `conda_env` (str, optional): The content of a conda environment YAML file to use for the wrapper.
+1. **Clone the repository:**
+    ```bash
+    git clone https://github.com/excelwang/snakemake-web-api.git
+    cd snakemake-web-api
+    ```
 
-### `run_snakemake_workflow`
+2. **Install project dependencies:**
+    ```bash
+    uv sync
+    ```
 
-This tool executes a complete Snakemake workflow.
+3. **Activate the virtual environment:**
+    ```bash
+    source .venv/bin/activate  # On Linux/macOS
+    # or
+    .venv\Scripts\activate     # On Windows
+    ```
 
-*   `workflow_name` (str, required): The name of the workflow directory inside the `snakemake-workflows` directory.
-*   `inputs` (dict or list, optional): Input files for the workflow. This will be added to the config under the `inputs` key.
-*   `outputs` (dict or list, optional): Output files for the workflow. This will be added to the config under the `outputs` key.
-*   `params` (dict, optional): Parameters to be added to or to override in the workflow's `config.yaml`.
-*   `threads` (int, optional, default: 1): Number of cores to provide to Snakemake (`--cores`).
-*   `log` (dict or list, optional): Log file paths. (Note: this is not directly used by the workflow runner yet).
-*   `extra_snakemake_args` (str, optional): A string of extra arguments to pass to the `snakemake` command.
-*   `container` (str, optional): Path to a container image to use for the workflow jobs.
-*   `benchmark` (str, optional): Path to a file where benchmarking results will be written for the jobs.
-*   `resources` (dict, optional): A dictionary of global resources to allocate to the workflow.
-*   `shadow` (str, optional): The shadow mode to use for the workflow jobs.
-*   `target_rule` (str, optional): The name of the rule to execute as the target. If not provided, the default target rule (`all`) will be used.
+### Environment Variables
 
-
-## Installation and Setup
-
-To run the Snakemake MCP Server, you need to have Snakemake and Conda (or Mamba) installed in your environment.
-
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `SNAKEBASE_DIR` | Base directory for `snakemake-wrappers` and `snakemake-workflows` subdirectories | `~/snakebase` |
+| `SNAKEMAKE_CONDA_PREFIX` | Path to conda environments for Snakemake | `~/.snakemake/conda` |
 
 ### Setting up the `snakebase` Directory
 
@@ -81,128 +73,111 @@ The `snakebase` directory must contain the following subdirectories:
     cd snakemake-workflows
     git clone https://github.com/snakemake-workflows/rna-seq-star-deseq2
     git clone https://github.com/snakemake-workflows/dna-seq-varlociraptor
+    git clone https://github.com/excelwang/StainedGlass
     # etc.
     ```
 
-After these steps, your `snakebase` directory should have the following structure:
+## Quick Test Walkthrough
 
-```
-snakebase/
-├── snakemake-wrappers/
-│   ├── bio/
-│   ├── meta/
-│   └── ...
-└── snakemake-workflows/
-    ├── rna-seq-star-deseq2/
-    │   ├── .test/
-    │   ├── config/
-    │   └── workflow/
-    └── ...
-```
-## Using `uv` to install this package (Recommended)
+This section guides you through a quick test of the system to verify everything is working correctly.
 
-This method uses the `uv` package manager to install the server as a proper Python package.
+### 1. Parse Wrappers
 
-1.  **Clone this repository:**
-    ```bash
-    git clone https://github.com/excelwang/snakemake-web-api.git
-    cd snakemake-web-api
-    ```
+First, parse and cache all wrapper metadata:
 
-2.  **Create a virtual environment (recommended):**
-    ```bash
-    python -m venv .venv
-    source .venv/bin/activate
-    ```
-    Alternatively, you can use `conda` to create an environment.
-
-3.  **Install the server using `uv`:**
-    ```bash
-    uv pip install -e .
-    ```
-    This will install the server in editable mode and all its dependencies.
-
-## Run the Server
-    Navigate to the `snakemake-web-api` directory and start the server using the `click` CLI:
-
-    ```bash
-    export SNAKEBASE_DIR=~/snakebase
-    snakemake-web-api run \
-        --host 127.0.0.1 \
-        --port 8081
-    ```
-
-## Usage Examples
-
-### Executing a Single Snakemake Wrapper (`run_snakemake_wrapper`)
-
-This example demonstrates how to run the `samtools/faidx` wrapper.
-
-```python
-import asyncio
-from fastmcp import Client
-
-async def main():
-    client = Client("http://127.0.0.1:8081/mcp")
-    async with client:
-        try:
-            result = await client.call_tool(
-                "run_snakemake_wrapper",
-                {
-                    "wrapper_name": "samtools/faidx",
-                    "inputs": ["/tmp/test_genome.fasta"],
-                    "outputs": ["/tmp/test_genome.fasta.fai"],
-                    "params": {},
-                    "threads": 1,
-                    # Optional: Specify a conda environment for the wrapper
-                    "conda_env": "the content of conda_env.yaml",
-                    # Optional: Run with shadow mode
-                    "shadow": "minimal",
-                }
-            )
-            print(f"Wrapper execution successful: {result.data}")
-        except Exception as e:
-            print(f"Wrapper execution failed: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+```bash
+export SNAKEBASE_DIR=~/snakebase # optional
+swa parse
 ```
 
-### Executing a Full Snakemake Workflow (`run_snakemake_workflow`)
+This will scan your `snakemake-wrappers` directory and cache metadata for faster server startup.
 
-This example shows how to run a workflow like `rna-seq-star-deseq2` and dynamically override a parameter in its `config.yaml`.
+### 2. Start REST API Server
 
-Assume your `rna-seq-star-deseq2` workflow has a `config/config.yaml` like this:
+Start the REST API server to access web endpoints:
 
-```yaml
-message: "default message"
+```bash
+swa rest --host 127.0.0.1 --port 8082
 ```
 
-And its `workflow/Snakefile` uses `config["message"]`.
+### 3. Verify Server Status
 
-```python
-import asyncio
-from fastmcp import Client
+Check that your server is running:
 
-async def main():
-    client = Client("http://127.0.0.1:8081/mcp")
-    async with client:
-        try:
-            result = await client.call_tool(
-                "run_snakemake_workflow",
-                {
-                    "workflow_name": "rna-seq-star-deseq2",
-                    "outputs": ["/path/to/workflow/output.txt"], # Example output
-                    "params": {"message": "hello from mcp server"}, # Override config parameter
-                    "threads": 8,
-                    # Optional: Target a specific rule within the workflow
-                    "target_rule": "all",
-                }
-            )
-            print(f"Workflow execution successful: {result.data}")
-        except Exception as e:
-            print(f"Workflow execution failed: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+```bash
+curl http://127.0.0.1:8082/health
 ```
+
+You should get a response indicating the server is healthy.
+
+### 4. List Available Tools
+
+Get a list of available Snakemake wrappers:
+
+```bash
+curl http://127.0.0.1:8082/tools
+```
+
+### 5. Run a Demo Wrapper
+
+To run a demo wrapper, first get a demo case:
+
+```bash
+curl http://127.0.0.1:8082/demo-case
+```
+
+Then execute the demo using the POST endpoint:
+
+```bash
+curl -X POST http://127.0.0.1:8082/tool-processes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "wrapper_name": "bio/samtools/faidx",
+    "inputs": ["test_input.fasta"],
+    "outputs": ["test_input.fasta.fai"]
+  }'
+```
+
+### 6. Verify Installation
+
+You can also verify the installation with the verify command:
+
+```bash
+swa verify --dry-run
+```
+
+This will show you what demos would be executed without actually running them.
+
+## Running the Server
+
+The server offers different modes based on your needs:
+
+### REST API Server
+To start the REST API server:
+
+```bash
+swa rest --host 127.0.0.1 --port 8082
+```
+
+### MCP Protocol Server
+To start the MCP (Model Context Protocol) server:
+
+```bash
+swa mcp --host 127.0.0.1 --port 8083
+```
+
+### Parsing Wrappers
+To parse and cache metadata for all available Snakemake wrappers:
+
+```bash
+swa parse
+```
+
+### Verifying Installation
+To verify that your installation is working correctly:
+
+```bash
+swa verify
+```
+
+For a complete list of options, see the [CLI Commands Guide](CLI_COMMANDS.md).

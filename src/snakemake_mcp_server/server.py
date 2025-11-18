@@ -1,14 +1,9 @@
-import anyio
 import click
 import sys
 import os
 import logging
 import dotenv
 from pathlib import Path
-from typing import Union, Dict, List, Optional
-import requests
-import time
-from fastmcp import FastMCP
 
 # Load environment variables from ~/.swa/.env if file exists
 config_dir = Path.home() / ".swa"

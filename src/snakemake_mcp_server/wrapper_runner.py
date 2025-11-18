@@ -230,7 +230,7 @@ def _generate_wrapper_snakefile(
     if inputs:
         if isinstance(inputs, dict):
             rule_parts.append("    input:")
-            input_strs = [f'        {k}="{v}",' for k, v in inputs.items()] # Added comma
+            input_strs = [f'        {k}={repr(v)},' for k, v in inputs.items()]
             rule_parts.extend(input_strs)
         elif isinstance(inputs, list):
             input_strs = [f'"{inp}"' for inp in inputs]
@@ -246,7 +246,7 @@ def _generate_wrapper_snakefile(
                     path = v.get('path')
                     output_strs.append(f'        {k}=directory("{path}"),')
                 else:
-                    output_strs.append(f'        {k}="{v}",')
+                    output_strs.append(f'        {k}={repr(v)},')
             rule_parts.extend(output_strs)
         elif isinstance(outputs, list):
             # This branch might need similar logic if unnamed outputs can be directories
@@ -264,7 +264,7 @@ def _generate_wrapper_snakefile(
     if params is not None:
         if isinstance(params, dict):
             rule_parts.append("    params:")
-            param_strs = [f'        {k}="{v}",' if isinstance(v, str) else f'        {k}={v},' for k, v in params.items()] # Added comma
+            param_strs = [f'        {k}={repr(v)},' for k, v in params.items()]
             rule_parts.extend(param_strs)
         elif isinstance(params, list):
             rule_parts.append(f"    params: {repr(params)}")
@@ -275,7 +275,7 @@ def _generate_wrapper_snakefile(
     if log:
         if isinstance(log, dict):
             rule_parts.append("    log:")
-            log_strs = [f'        {k}="{v}",' for k, v in log.items()] # Added comma
+            log_strs = [f'        {k}={repr(v)},' for k, v in log.items()]
             rule_parts.extend(log_strs)
         elif isinstance(log, list):
             log_strs = [f'"{lg}"' for lg in log]

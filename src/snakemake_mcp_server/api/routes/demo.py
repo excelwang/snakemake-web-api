@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request
-from ...schemas import DemoCaseResponse, UserSnakemakeWrapperRequest
+from ...schemas import DemoCaseResponse, UserWrapperRequest
 
 router = APIRouter()
 
@@ -16,8 +16,8 @@ async def get_samtools_faidx_demo_case(request: Request):
     output_file_name = "genome.fa.fai"
 
     # Construct the UserSnakemakeWrapperRequest payload
-    user_payload = UserSnakemakeWrapperRequest(
-        wrapper_name="bio/samtools/faidx",
+    user_payload = UserWrapperRequest(
+        wrapper_id="bio/samtools/faidx",
         inputs=[input_file_name], # Relative to workdir
         outputs=[output_file_name], # Relative to workdir
     )

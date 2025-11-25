@@ -247,8 +247,8 @@ def generate_demo_calls_for_wrapper(wrapper_path: str, wrappers_root: str) -> Li
                 logger.debug(f"Skipping rule '{rule_info.get('name')}' as a demo because it has unresolved wildcards.")
                 continue
 
-            payload = rule_info
-            payload['workdir'] = str(test_dir)
+            # Convert the rule to API call format to filter out internal Snakemake fields
+            payload = convert_rule_to_tool_process_call(rule_info)
             demo_calls.append(payload)
 
     return demo_calls
@@ -256,24 +256,47 @@ def generate_demo_calls_for_wrapper(wrapper_path: str, wrappers_root: str) -> Li
 def convert_rule_to_tool_process_call(rule_info: Dict[str, Any]) -> Dict[str, Any]:
     """
     Converts a parsed Snakemake rule into a tool/process API call format.
+    Only includes user-modifiable fields, not Snakemake internal fields.
     """
     inputs = rule_info.get('input', {})
     outputs = rule_info.get('output', {})
     params = rule_info.get('params', {})
-    
+
     # Extract the wrapper path from the 'wrapper' directive
     wrapper_directive = rule_info.get('wrapper', '')
     if wrapper_directive.startswith("master/"):
         wrapper_name = wrapper_directive[len("master/"):]
     else:
         wrapper_name = wrapper_directive
-        
-    return {
-        "wrapper_name": wrapper_name,
+
+    # Only return user-modifiable fields, not Snakemake internal fields
+    result = {
+        "wrapper_id": wrapper_name,
         "inputs": inputs,
         "outputs": outputs,
-        "params": params,
-        "log": rule_info.get('log'),
-        "threads": rule_info.get('threads'),
-        # Add other potential fields as needed, mapping Snakemake rule attributes to API fields
+        "params": params
     }
+
+    # Add optional fields if they exist and are relevant for user input
+    if 'log' in rule_info and rule_info['log'] is not None:
+        result['log'] = rule_info['log']
+
+    if 'threads' in rule_info and rule_info['threads'] is not None:
+        result['threads'] = rule_info['threads']
+
+    # Only add resources if they contain user-modifiable values (not internal Snakemake values)
+    if 'resources' in rule_info and rule_info['resources'] is not None:
+        resources = rule_info['resources']
+        # Filter out Snakemake internal resource values
+        if isinstance(resources, dict):
+            filtered_resources = {k: v for k, v in resources.items()
+                                if not k.startswith('_') and k != 'tmpdir'}
+            if filtered_resources:  # Only add if there are user-modifiable resources
+                result['resources'] = filtered_resources
+        else:
+            result['resources'] = resources
+
+    if 'priority' in rule_info and rule_info['priority'] is not None:
+        result['priority'] = rule_info['priority']
+
+    return result

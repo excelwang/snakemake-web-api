@@ -2,28 +2,28 @@ import logging
 import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from ...workflow_runner import run_workflow
-from ...schemas import SnakemakeWorkflowRequest, SnakemakeResponse
+from ...schemas import InternalWorkflowRequest, SnakemakeResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.post("/workflow-processes", response_model=SnakemakeResponse, operation_id="workflow_process")
-async def workflow_process_endpoint(request: SnakemakeWorkflowRequest, http_request: Request):
+async def workflow_process_endpoint(request: InternalWorkflowRequest, http_request: Request):
     """
     Process a Snakemake workflow by name and returns the result.
     """
-    logger.info(f"Received request for workflow: {request.workflow_name}")
+    logger.info(f"Received request for workflow: {request.workflow_id}")
 
-    if not request.workflow_name:
-        raise HTTPException(status_code=400, detail="'workflow_name' must be provided for workflow execution.")
+    if not request.workflow_id:
+        raise HTTPException(status_code=400, detail="'workflow_id' must be provided for workflow execution.")
 
-    logger.info(f"Processing workflow request: {request.workflow_name}")
+    logger.info(f"Processing workflow request: {request.workflow_id}")
 
     try:
         result = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: run_workflow(
-                workflow_name=request.workflow_name,
+                workflow_name=request.workflow_id,
                 inputs=request.inputs,
                 outputs=request.outputs,
                 params=request.params,

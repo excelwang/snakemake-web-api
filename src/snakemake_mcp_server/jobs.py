@@ -1,12 +1,12 @@
 import logging
 from pathlib import Path
 from .wrapper_runner import run_wrapper
-from .schemas import JobStatus, SnakemakeWrapperRequest
+from .schemas import JobStatus, InternalWrapperRequest
 
 # In-memory store for jobs
 job_store = {}
 
-async def run_snakemake_job_in_background(job_id: str, request: SnakemakeWrapperRequest, wrappers_path: str):
+async def run_snakemake_job_in_background(job_id: str, request: InternalWrapperRequest, wrappers_path: str):
     """
     A wrapper function to run the snakemake job in the background and update job store.
     """
@@ -16,7 +16,7 @@ async def run_snakemake_job_in_background(job_id: str, request: SnakemakeWrapper
 
     try:
         result = await run_wrapper(
-            wrapper_name=request.wrapper_name,
+            wrapper_name=request.wrapper_id,
             workdir=request.workdir,
             inputs=request.inputs,
             outputs=request.outputs,

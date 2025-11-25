@@ -7,26 +7,12 @@ from typing import Union, Dict, List, Optional
 from io import StringIO
 from contextlib import redirect_stdout, redirect_stderr
 import asyncio
+from .schemas import InternalWrapperRequest
 
 logger = logging.getLogger(__name__)
 
 async def run_wrapper(
-    # Align with Snakemake Rule properties
-    wrapper_name: str,
-    workdir: str,
-    inputs: Optional[Union[Dict, List]] = None,
-    outputs: Optional[Union[Dict, List]] = None,
-    params: Optional[List] = None,
-    log: Optional[Union[Dict, List]] = None,
-    threads: Optional[int] = None,
-    resources: Optional[Dict] = None,
-    priority: Optional[int] = None,
-    shadow_depth: Optional[str] = None,
-    benchmark: Optional[str] = None,
-    container_img: Optional[str] = None,
-    env_modules: Optional[List[str]] = None,
-    group: Optional[str] = None,
-    # Execution control
+    request: InternalWrapperRequest,
     timeout: int = 600,
 ) -> Dict:
     """
@@ -46,19 +32,19 @@ async def run_wrapper(
 
     try:
         # 1. Prepare working directory
-        if not workdir or not Path(workdir).is_dir():
+        if not request.workdir or not Path(request.workdir).is_dir():
             return {"status": "failed", "stdout": "", "stderr": "A valid 'workdir' must be provided for execution.", "exit_code": -1, "error_message": "Missing or invalid workdir."}
 
-        if not wrapper_name:
-            return {"status": "failed", "stdout": "", "stderr": "A 'wrapper_name' must be provided for execution.", "exit_code": -1, "error_message": "wrapper_name must be a non-empty string."}
+        if not request.wrapper_id:
+            return {"status": "failed", "stdout": "", "stderr": "A 'wrapper_id' must be provided for execution.", "exit_code": -1, "error_message": "wrapper_id must be a non-empty string."}
 
-        execution_workdir = Path(workdir).resolve()
+        execution_workdir = Path(request.workdir).resolve()
 
 
         # --- Conda Environment Discovery and Copying ---
         resolved_conda_env_path_for_snakefile = None
         conda_env_filename = "environment.yaml"
-        potential_conda_env_path = abs_wrappers_path / wrapper_name / conda_env_filename
+        potential_conda_env_path = abs_wrappers_path / request.wrapper_id / conda_env_filename
 
         if potential_conda_env_path.exists():
             # Copy environment.yaml to the execution_workdir
@@ -66,16 +52,16 @@ async def run_wrapper(
             resolved_conda_env_path_for_snakefile = conda_env_filename # Use relative path within workdir
             logger.debug(f"Conda environment {potential_conda_env_path} copied to {execution_workdir / conda_env_filename}")
         else:
-            logger.debug(f"No environment.yaml found for wrapper {wrapper_name} at {potential_conda_env_path}")
+            logger.debug(f"No environment.yaml found for wrapper {request.wrapper_id} at {potential_conda_env_path}")
         # --- End Conda Environment Discovery ---
 
         # Pre-emptively create log directories to handle buggy wrappers
-        if log:
+        if request.log:
             log_files = []
-            if isinstance(log, dict):
-                log_files.extend(log.values())
-            elif isinstance(log, list):
-                log_files.extend(log)
+            if isinstance(request.log, dict):
+                log_files.extend(request.log.values())
+            elif isinstance(request.log, list):
+                log_files.extend(request.log)
             
             for log_file in log_files:
                 # Paths in the payload are relative to the workdir
@@ -90,21 +76,9 @@ async def run_wrapper(
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".smk", dir=execution_workdir, encoding='utf-8') as tmp_snakefile:
             snakefile_path = Path(tmp_snakefile.name)
             snakefile_content = _generate_wrapper_snakefile(
-                wrapper_name=wrapper_name,
+                request=request,
                 wrappers_path=str(abs_wrappers_path),
-                inputs=inputs,
-                outputs=outputs,
-                params=params,
-                log=log,
-                threads=threads,
-                resources=resources,
-                priority=priority,
-                shadow_depth=shadow_depth,
-                benchmark=benchmark,
                 conda_env_path_for_snakefile=resolved_conda_env_path_for_snakefile, # Pass the relative path
-                container_img=container_img,
-                env_modules=env_modules,
-                group=group
             )
             logger.debug(f"Generated Snakefile content:\n{snakefile_content}")
             tmp_snakefile.write(snakefile_content)
@@ -128,7 +102,7 @@ async def run_wrapper(
         cmd_list = [
             "snakemake",
             "--snakefile", str(snakefile_path),
-            "--cores", str(threads) if threads is not None else "1",
+            "--cores", str(request.threads) if request.threads is not None else "1",
             "--nocolor",
             "--forceall",  # Force execution since we are in a temp/isolated context
             "--wrapper-prefix", str(abs_wrappers_path) + os.sep # Add wrapper prefix with trailing slash
@@ -141,13 +115,13 @@ async def run_wrapper(
             cmd_list.extend(["--conda-prefix", conda_prefix])
 
         # Add targets if they exist
-        if outputs:
+        if request.outputs:
             targets = []
             output_values = []
-            if isinstance(outputs, dict):
-                output_values = list(outputs.values())
-            elif isinstance(outputs, list):
-                output_values = outputs
+            if isinstance(request.outputs, dict):
+                output_values = list(request.outputs.values())
+            elif isinstance(request.outputs, list):
+                output_values = request.outputs
             
             for item in output_values:
                 if isinstance(item, dict) and item.get('is_directory'):
@@ -198,21 +172,9 @@ async def run_wrapper(
 
 
 def _generate_wrapper_snakefile(
-    wrapper_name: str,
+    request: InternalWrapperRequest,
     wrappers_path: str,
-    inputs: Optional[Union[Dict, List]] = None,
-    outputs: Optional[Union[Dict, List]] = None,
-    params: Optional[Union[Dict, List]] = None,
-    log: Optional[Union[Dict, List]] = None,
-    threads: Optional[int] = None,
-    resources: Optional[Dict] = None,
-    priority: Optional[int] = None,
-    shadow_depth: Optional[str] = None,
-    benchmark: Optional[str] = None,
     conda_env_path_for_snakefile: Optional[str] = None,
-    container_img: Optional[str] = None,
-    env_modules: Optional[List[str]] = None,
-    group: Optional[str] = None,
 ) -> str:
     """
     Generate a Snakefile content for a single wrapper rule.
@@ -220,6 +182,7 @@ def _generate_wrapper_snakefile(
     # Build the rule definition
     rule_parts = ["rule run_single_wrapper:"]
     
+    wrapper_name = request.wrapper_id
     logger.debug(f"Generating Snakefile for wrapper: {wrapper_name} with wrappers_path: {wrappers_path}")
 
     # Remove "master/" prefix from wrapper_name if it exists, as per user's instruction
@@ -227,31 +190,31 @@ def _generate_wrapper_snakefile(
         wrapper_name = wrapper_name[len("master/"):]
 
     # Inputs
-    if inputs:
-        if isinstance(inputs, dict):
+    if request.inputs:
+        if isinstance(request.inputs, dict):
             rule_parts.append("    input:")
-            input_strs = [f'        {k}={repr(v)},' for k, v in inputs.items()]
+            input_strs = [f'        {k}={repr(v)},' for k, v in request.inputs.items()]
             rule_parts.extend(input_strs)
-        elif isinstance(inputs, list):
-            input_strs = [f'"{inp}"' for inp in inputs]
+        elif isinstance(request.inputs, list):
+            input_strs = [f'"{inp}"' for inp in request.inputs]
             rule_parts.append(f"    input: {', '.join(input_strs)}")
     
     # Outputs
-    if outputs:
-        if isinstance(outputs, dict):
+    if request.outputs:
+        if isinstance(request.outputs, dict):
             rule_parts.append("    output:")
             output_strs = []
-            for k, v in outputs.items():
+            for k, v in request.outputs.items():
                 if isinstance(v, dict) and v.get('is_directory'):
                     path = v.get('path')
                     output_strs.append(f'        {k}=directory("{path}"),')
                 else:
                     output_strs.append(f'        {k}={repr(v)},')
             rule_parts.extend(output_strs)
-        elif isinstance(outputs, list):
+        elif isinstance(request.outputs, list):
             # This branch might need similar logic if unnamed outputs can be directories
             output_strs = []
-            for out in outputs:
+            for out in request.outputs:
                 if isinstance(out, dict) and out.get('is_directory'):
                     path = out.get('path')
                     output_strs.append(f'directory("{path}")')
@@ -261,35 +224,35 @@ def _generate_wrapper_snakefile(
 
     
     # Params
-    if params is not None:
-        if isinstance(params, dict):
+    if request.params is not None:
+        if isinstance(request.params, dict):
             rule_parts.append("    params:")
-            param_strs = [f'        {k}={repr(v)},' for k, v in params.items()]
+            param_strs = [f'        {k}={repr(v)},' for k, v in request.params.items()]
             rule_parts.extend(param_strs)
-        elif isinstance(params, list):
+        elif isinstance(request.params, list):
             rule_parts.append(f"    params: {repr(params)}")
         else:
             rule_parts.append(f"    params: {repr(params)}")
     
     # Log
-    if log:
-        if isinstance(log, dict):
+    if request.log:
+        if isinstance(request.log, dict):
             rule_parts.append("    log:")
-            log_strs = [f'        {k}={repr(v)},' for k, v in log.items()]
+            log_strs = [f'        {k}={repr(v)},' for k, v in request.log.items()]
             rule_parts.extend(log_strs)
-        elif isinstance(log, list):
-            log_strs = [f'"{lg}"' for lg in log]
+        elif isinstance(request.log, list):
+            log_strs = [f'"{lg}"' for lg in request.log]
             rule_parts.append(f"    log: {', '.join(log_strs)}")
     
     # Threads
-    if threads is not None:
-        rule_parts.append(f"    threads: {threads}")
+    if request.threads is not None:
+        rule_parts.append(f"    threads: {request.threads}")
     
     # Resources
-    if resources:
+    if request.resources:
         rule_parts.append("    resources:")
         processed_resources = []
-        for k, v in resources.items():
+        for k, v in request.resources.items():
             if callable(v) or (isinstance(v, str) and v == "<callable>"):
                 continue
             else:
@@ -297,32 +260,32 @@ def _generate_wrapper_snakefile(
         rule_parts.extend(processed_resources)
     
     # Priority
-    if priority is not None:
-        rule_parts.append(f"    priority: {priority}")
+    if request.priority is not None:
+        rule_parts.append(f"    priority: {request.priority}")
     
     # Shadow
-    if shadow_depth:
-        rule_parts.append(f"    shadow: '{shadow_depth}'")
+    if request.shadow_depth:
+        rule_parts.append(f"    shadow: '{request.shadow_depth}'")
     
     # Benchmark
-    if benchmark:
-        rule_parts.append(f"    benchmark: '{benchmark}'")
+    if request.benchmark:
+        rule_parts.append(f"    benchmark: '{request.benchmark}'")
     
     # Conda
     if conda_env_path_for_snakefile:
         rule_parts.append(f"    conda: '{conda_env_path_for_snakefile}'")
     
     # Container
-    if container_img:
-        rule_parts.append(f'    container: "{container_img}"')
+    if request.container_img:
+        rule_parts.append(f'    container: "{request.container_img}"')
     
     # Group
-    if group:
-        rule_parts.append(f'    group: "{group}"')
+    if request.group:
+        rule_parts.append(f'    group: "{request.group}"')
     
     # Environment modules
-    if env_modules:
-        rule_parts.append(f"    # env_modules: {env_modules}")
+    if request.env_modules:
+        rule_parts.append(f"    # env_modules: {request.env_modules}")
     
     # Wrapper
     rule_parts.append(f'    wrapper: "{wrapper_name}"')

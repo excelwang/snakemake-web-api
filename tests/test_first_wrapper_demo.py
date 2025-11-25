@@ -11,7 +11,7 @@ import os
 import json
 import subprocess
 from pathlib import Path
-from snakemake_mcp_server.schemas import WrapperMetadata
+from snakemake_mcp_server.schemas import WrapperMetadata, DemoCall, UserWrapperRequest, PlatformRunParams
 
 
 def ensure_parser_cache_exists(wrappers_path_str: str):
@@ -54,32 +54,33 @@ def ensure_parser_cache_exists(wrappers_path_str: str):
     return True
 
 
-def load_cached_wrapper_metadata(wrappers_dir: str) -> list[WrapperMetadata]:
+def load_cached_wrapper_data(wrappers_dir: str) -> list[tuple[WrapperMetadata, list[DemoCall]]]:
     """
-    Loads cached metadata for all wrappers from the pre-parsed cache.
+    Loads cached metadata and demos for all wrappers from the pre-parsed cache.
     If the cache doesn't exist, it will be generated first.
     """
     if not ensure_parser_cache_exists(wrappers_dir):
         logging.warning(f"Could not generate parser cache directory. No tools will be loaded.")
         return []
 
-    # Cache is stored in ~/.swa/parser, not relative to the wrappers directory
     cache_dir = Path.home() / ".swa" / "parser"
     if not cache_dir.exists():
         logging.warning(f"Parser cache directory still not found at '{cache_dir}'. No tools will be loaded.")
         return []
 
-    wrappers = []
+    wrapper_data = []
     for root, _, files in os.walk(cache_dir):
         for file in files:
             if file.endswith(".json"):
                 try:
                     with open(os.path.join(root, file), 'r') as f:
                         data = json.load(f)
-                        wrappers.append(WrapperMetadata(**data))
+                        wrapper_meta = WrapperMetadata(**data)
+                        demos = [DemoCall(**d) for d in data.get('demos', [])]
+                        wrapper_data.append((wrapper_meta, demos))
                 except Exception as e:
                     logging.error(f"Failed to load cached wrapper from {file}: {e}")
-    return wrappers
+    return wrapper_data
 
 
 @pytest.mark.asyncio
@@ -93,60 +94,42 @@ async def test_first_wrapper_demo():
     
     logging.info(f"Starting test for first cached wrapper demo from: {wrappers_path}")
 
-    wrappers = load_cached_wrapper_metadata(wrappers_path)
-    if not wrappers:
+    all_wrapper_data = load_cached_wrapper_data(wrappers_path)
+    if not all_wrapper_data:
         pytest.skip("No cached wrappers found, skipping cached demo test.")
 
-    logging.info(f"Found {len(wrappers)} cached wrappers. Testing first demo...")
+    logging.info(f"Found {len(all_wrapper_data)} cached wrappers. Testing first demo...")
 
     successful_demos = 0
     failed_demos = 0
     skipped_demos = 0
 
-    # Find and execute only the first demo found among all wrappers
     first_demo_executed = False
-    for wrapper in wrappers:
+    for wrapper_meta, demos in all_wrapper_data:
         if first_demo_executed:
             break
             
-        if not wrapper.demos:
+        if not demos:
             continue
 
-        logging.info(f"Testing demos for wrapper: {wrapper.path}")
-        for i, demo in enumerate(wrapper.demos):
+        logging.info(f"Testing demos for wrapper: {wrapper_meta.id}")
+        for i, demo_call in enumerate(demos):
             if first_demo_executed:
                 break
 
-            payload = demo.payload
-            logging.info(f"  - Processing Demo {i+1}...")
-
-            # Only use the 4 required parameters for the API
-            wrapper_name = payload.get('wrapper', '').replace('file://', '')
-            if wrapper_name.startswith("master/"):
-                wrapper_name = wrapper_name[len("master/"):]
-
-            inputs = payload.get('input', {})
-            outputs = payload.get('output', {})
-            params = payload.get('params', {})
-
-            # Skip if wrapper name is empty
-            if not wrapper_name:
-                logging.warning(f"    Demo {i+1}: SKIPPED because wrapper name is empty.")
-                skipped_demos += 1
-                # Continue to the next demo even if this one is skipped
-                continue
-
+            user_request = demo_call.payload # demo_call.payload is already UserWrapperRequest
+            platform_params = wrapper_meta.platform_params
+            
+            logging.info(f"  - Processing Demo {i+1} for wrapper {wrapper_meta.id}...")
 
             # Execute the wrapper using run_demo which handles input file copying
             logging.info(f"    Demo {i+1}: Executing demo...")
-            demo_workdir = payload.get('workdir')
+            demo_workdir = os.path.join(wrappers_path, user_request.wrapper_id, "test")
             from snakemake_mcp_server.demo_runner import run_demo
             result = await run_demo(
-                wrapper_name=wrapper_name,
-                inputs=inputs,
-                outputs=outputs,
-                params=params,
-                demo_workdir=demo_workdir  # Pass the demo workdir for input file copying
+                user_request=user_request,
+                platform_params=platform_params,
+                demo_workdir=demo_workdir
             )
 
             if result.get("status") == "success":
@@ -158,7 +141,6 @@ async def test_first_wrapper_demo():
                 logging.error(f"      Stderr: {result.get('stderr')}")
                 failed_demos += 1
 
-            # Mark that we've executed the first demo and break out of loops
             first_demo_executed = True
             break  # Break out of the inner loop
 
@@ -172,7 +154,6 @@ async def test_first_wrapper_demo():
     logging.info(f"Skipped demos: {skipped_demos}")
     logging.info("="*60)
 
-    # If the demo failed, the test should fail
     if failed_demos > 0:
         pytest.fail(f"Test failed because the first demo did not execute successfully.")
     

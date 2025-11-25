@@ -4,7 +4,7 @@ import json
 import yaml
 from pathlib import Path
 from ..snakefile_parser import generate_demo_calls_for_wrapper
-from ..schemas import WrapperMetadata, DemoCall
+from ..schemas import WrapperMetadata, DemoCall, WrapperInfo, UserProvidedParams, PlatformRunParams
 
 @click.command(
     help="Parse all wrappers and cache the metadata to JSON files for faster server startup."
@@ -58,24 +58,42 @@ def parse(ctx):
                     enhanced_demos = None
                 
                 wrapper_meta = WrapperMetadata(
-                    name=wrapper_rel_path,
-                    classic_name=meta_data.get('name', os.path.basename(root)),
-                    description=meta_data.get('description'),
-                    url=meta_data.get('url'),
-                    authors=meta_data.get('authors'),
-                    input=meta_data.get('input'),
-                    output=meta_data.get('output'),
-                    params=meta_data.get('params'),
-                    notes=notes_data,
-                    demos=enhanced_demos,
-                    demo_count=num_demos
+                    id=wrapper_rel_path,  # 唯一标识符
+                    info=WrapperInfo(
+                        name=meta_data.get('name', os.path.basename(root)),  # 显示名称
+                        description=meta_data.get('description'),
+                        url=meta_data.get('url'),
+                        authors=meta_data.get('authors'),
+                        notes=notes_data
+                    ),
+                    user_params=UserProvidedParams(
+                        inputs=meta_data.get('input'),  # meta.yaml 中的 input 映射到 inputs
+                        outputs=meta_data.get('output'),  # meta.yaml 中的 output 映射到 outputs
+                        params=meta_data.get('params')
+                    ),
+                    platform_params=PlatformRunParams(
+                        log=meta_data.get('log'),
+                        threads=meta_data.get('threads'),
+                        resources=meta_data.get('resources'),
+                        priority=meta_data.get('priority'),
+                        shadow_depth=meta_data.get('shadow_depth'),
+                        benchmark=meta_data.get('benchmark'),
+                        conda_env=meta_data.get('conda_env'),
+                        container_img=meta_data.get('container_img'),
+                        env_modules=meta_data.get('env_modules'),
+                        group=meta_data.get('group')
+                    )
                 )
-                
+
+                # Save to cache with demos included in the JSON
+                cache_data = wrapper_meta.model_dump(mode="json")
+                cache_data["demos"] = enhanced_demos
+
                 # Save to cache
                 cache_file_path = cache_dir / f"{wrapper_rel_path}.json"
                 cache_file_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(cache_file_path, 'w') as f:
-                    f.write(wrapper_meta.model_dump_json(indent=2))
+                    f.write(json.dumps(cache_data, indent=2))
 
             except Exception as e:
                 click.echo(f"  [ERROR] Failed to parse or cache {wrapper_rel_path}: {e}", err=True)

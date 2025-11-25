@@ -9,8 +9,8 @@ from ...schemas import (
     Job,
     JobStatus,
     JobSubmissionResponse,
-    SnakemakeWrapperRequest,
-    UserSnakemakeWrapperRequest,
+    InternalWrapperRequest,
+    UserWrapperRequest,
 )
 from .tools import load_wrapper_metadata
 
@@ -18,21 +18,21 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.post("/tool-processes", response_model=JobSubmissionResponse, status_code=status.HTTP_202_ACCEPTED, operation_id="tool_process")
-async def tool_process_endpoint(request: UserSnakemakeWrapperRequest, background_tasks: BackgroundTasks, response: Response, http_request: Request):
+async def tool_process_endpoint(request: UserWrapperRequest, background_tasks: BackgroundTasks, response: Response, http_request: Request):
     """
     Process a Snakemake tool by name and returns the result.
     """
-    logger.info(f"Received request for tool: {request.wrapper_name}")
+    logger.info(f"Received request for tool: {request.wrapper_id}")
     
-    if not request.wrapper_name:
+    if not request.wrapper_id:
         raise HTTPException(status_code=400, detail="'wrapper_name' must be provided for tool execution.")
 
     # 1. Load WrapperMetadata to infer hidden parameters
     wrapper_metadata_list = load_wrapper_metadata(http_request.app.state.wrappers_path)
-    wrapper_meta = next((wm for wm in wrapper_metadata_list if wm.name == request.wrapper_name), None)
+    wrapper_meta = next((wm for wm in wrapper_metadata_list if wm.id == request.wrapper_id), None)
 
     if not wrapper_meta:
-        raise HTTPException(status_code=404, detail=f"Wrapper '{request.wrapper_name}' not found.")
+        raise HTTPException(status_code=404, detail=f"Wrapper '{request.wrapper_id}' not found.")
 
     # 2. Dynamically generate workdir
     temp_dir = tempfile.mkdtemp()
@@ -45,19 +45,19 @@ async def tool_process_endpoint(request: UserSnakemakeWrapperRequest, background
 
     # 4. Infer values for hidden parameters from WrapperMetadata or use defaults
     #    Default to None if not found in metadata, as per user's instruction.
-    inferred_log = wrapper_meta.log
-    inferred_threads = wrapper_meta.threads if wrapper_meta.threads is not None else 1
-    inferred_resources = wrapper_meta.resources
-    inferred_priority = wrapper_meta.priority if wrapper_meta.priority is not None else 0
-    inferred_shadow_depth = wrapper_meta.shadow_depth
-    inferred_benchmark = wrapper_meta.benchmark
-    inferred_container_img = wrapper_meta.container_img
-    inferred_env_modules = wrapper_meta.env_modules
-    inferred_group = wrapper_meta.group
+    inferred_log = wrapper_meta.platform_params.log
+    inferred_threads = wrapper_meta.platform_params.threads if wrapper_meta.platform_params.threads is not None else 1
+    inferred_resources = wrapper_meta.platform_params.resources
+    inferred_priority = wrapper_meta.platform_params.priority if wrapper_meta.platform_params.priority is not None else 0
+    inferred_shadow_depth = wrapper_meta.platform_params.shadow_depth
+    inferred_benchmark = wrapper_meta.platform_params.benchmark
+    inferred_container_img = wrapper_meta.platform_params.container_img
+    inferred_env_modules = wrapper_meta.platform_params.env_modules
+    inferred_group = wrapper_meta.platform_params.group
 
-    # 5. Construct the full internal SnakemakeWrapperRequest
-    internal_request = SnakemakeWrapperRequest(
-        wrapper_name=request.wrapper_name,
+    # 5. Construct the full internal InternalSnakemakeRequest
+    internal_request = InternalWrapperRequest(
+        wrapper_id=request.wrapper_id,
         inputs=request.inputs,
         outputs=request.outputs,
         params=request.params,

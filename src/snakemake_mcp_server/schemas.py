@@ -23,42 +23,40 @@ class JobSubmissionResponse(BaseModel):
     status_url: str
 
 
-# Define Pydantic models for request/response
-class SnakemakeWrapperRequest(BaseModel):
-    wrapper_name: str
+# UserProvidedParams 用于请求和元数据存储（统一使用 inputs/outputs）
+class UserProvidedParams(BaseModel):
     inputs: Optional[Union[Dict, List]] = None
     outputs: Optional[Union[Dict, List]] = None
     params: Optional[Union[Dict, List]] = None
+
+
+# PlatformRunParams 用于请求和元数据存储（统一使用可选字段）
+class PlatformRunParams(BaseModel):
     log: Optional[Union[Dict, List]] = None
-    threads: int = 1
+    threads: Optional[int] = None
     resources: Optional[Dict] = None
-    priority: int = 0
+    priority: Optional[int] = None
     shadow_depth: Optional[str] = None
     benchmark: Optional[str] = None
     container_img: Optional[str] = None
     env_modules: Optional[List[str]] = None
     group: Optional[str] = None
+
+
+# Define Pydantic models for request/response
+class InternalWrapperRequest(UserProvidedParams, PlatformRunParams):
+    wrapper_id: str
     workdir: Optional[str] = None
 
 
-class UserSnakemakeWrapperRequest(BaseModel):
-    wrapper_name: str
-    inputs: Optional[Union[Dict, List]] = None
-    outputs: Optional[Union[Dict, List]] = None
-    params: Optional[Union[Dict, List]] = None
+class UserWrapperRequest(UserProvidedParams):
+    wrapper_id: str
 
 
-class SnakemakeWorkflowRequest(BaseModel):
-    workflow_name: str
-    inputs: Optional[Union[Dict, List]] = None
-    outputs: Optional[Union[Dict, List]] = None
-    params: Optional[Dict] = None
-    threads: int = 1
-    log: Optional[Union[Dict, List]] = None
+class InternalWorkflowRequest(UserProvidedParams, PlatformRunParams):
+    workflow_id: str
     extra_snakemake_args: str = ""
-    container: Optional[str] = None
-    benchmark: Optional[str] = None
-    resources: Optional[Dict] = None
+    container: Optional[str] = None  # This is different from container_img
     shadow: Optional[str] = None
     target_rule: Optional[str] = None
 
@@ -74,40 +72,51 @@ class SnakemakeResponse(BaseModel):
 class DemoCall(BaseModel):
     method: str
     endpoint: str
-    payload: Dict[str, Any]
+    payload: UserWrapperRequest
 
 
-class WrapperMetadata(BaseModel):
+# WrapperInfo 类字段
+class WrapperInfo(BaseModel):
     name: str
-    classic_name: str
     description: Optional[str] = None
     url: Optional[str] = None
     authors: Optional[List[str]] = None
-    input: Optional[Any] = None
-    output: Optional[Any] = None
-    params: Optional[Any] = None
-    log: Optional[Union[Dict, List]] = None
-    threads: Optional[int] = None
-    resources: Optional[Dict] = None
-    priority: Optional[int] = None
-    shadow_depth: Optional[str] = None
-    benchmark: Optional[str] = None
-    conda_env: Optional[str] = None
-    container_img: Optional[str] = None
-    env_modules: Optional[List[str]] = None
-    group: Optional[str] = None
     notes: Optional[List[str]] = None
-    demos: Optional[List[DemoCall]] = None
-    demo_count: Optional[int] = 0  # For summary view
+
+
+class WrapperMetadata(BaseModel):
+    # ID 字段
+    id: str
+
+    # WrapperInfo 类字段
+    info: WrapperInfo
+
+    # UserProvidedParams 类字段
+    user_params: UserProvidedParams
+
+    # PlatformRunParams 类字段
+    platform_params: PlatformRunParams
+
+
+class WrapperMetadataResponse(BaseModel):
+    # ID 字段
+    id: str
+
+    # WrapperInfo 类字段
+    info: WrapperInfo
+
+    # UserProvidedParams 类字段
+    user_params: UserProvidedParams
 
 
 class DemoCaseResponse(BaseModel):
     method: str
     endpoint: str
-    payload: SnakemakeWrapperRequest
+    payload: UserWrapperRequest
+    user_params: UserProvidedParams
     curl_example: str
 
 
 class ListWrappersResponse(BaseModel):
-    wrappers: List[WrapperMetadata]
+    wrappers: List[WrapperMetadataResponse]
     total_count: int

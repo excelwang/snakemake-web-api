@@ -1,8 +1,3 @@
-"""
-Integration tests for direct FastAPI REST endpoints.
-
-These tests verify the native FastAPI functionality without MCP wrapper.
-"""
 import pytest
 import asyncio
 from fastapi.testclient import TestClient
@@ -11,6 +6,7 @@ import tempfile
 import time
 from pathlib import Path
 import shutil
+from snakemake_mcp_server.schemas import UserWrapperRequest, InternalWrapperRequest, PlatformRunParams
 
 
 @pytest.fixture
@@ -40,9 +36,10 @@ async def test_direct_fastapi_wrapper_execution(rest_client):
     """Test direct FastAPI wrapper execution."""
     # Test wrapper execution using direct FastAPI access
     response = rest_client.post("/tool-processes", json={
-        "wrapper_name": "bio/fastqc",
+        "wrapper_id": "bio/fastqc",
         "inputs": ["test.fastq"],
-        "outputs": ["test_fastqc.html", "test_fastqc.zip"]
+        "outputs": ["test_fastqc.html", "test_fastqc.zip"],
+        "threads": 1 # Required by InternalWrapperRequest
     })
     
     assert response.status_code in [200, 202, 422]  # 422 is expected if files don't exist
@@ -63,32 +60,34 @@ async def test_direct_fastapi_wrapper_list(rest_client):
 @pytest.mark.asyncio
 async def test_direct_fastapi_wrapper_metadata(rest_client):
     """Test direct FastAPI wrapper metadata retrieval."""
-    test_tool_path = "bio/samtools/faidx"
+    test_tool_path = "bio/snpsift/varType"
     response = rest_client.get(f"/tools/{test_tool_path}")
     
     assert response.status_code == 200
     result = response.json()
-    assert "name" in result
-    print(f"Direct FastAPI metadata for {test_tool_path}: {result['name']}")
+    assert result["info"]["name"] == "SnpSift varType"
+    print(f"Direct FastAPI metadata for {test_tool_path}: {result['info']['name']}")
     
-    # Verify demo calls are included
-    if "demos" in result and result["demos"]:
-        demo = result["demos"][0]
-        assert "method" in demo
-        assert "endpoint" in demo
-        assert "payload" in demo
-        print(f"Direct FastAPI demo call structure validated for {test_tool_path}")
+    # Demos are no longer in WrapperMetadataResponse, they are fetched from /demos/{wrapper_id}
+    # This assertion is now irrelevant for WrapperMetadataResponse
+    # if "demos" in result and result["demos"]:
+    #     demo = result["demos"][0]
+    #     assert "method" in demo
+    #     assert "endpoint" in demo
+    #     assert "payload" in demo
+    #     print(f"Direct FastAPI demo call structure validated for {test_tool_path}")
 
 
 @pytest.mark.asyncio
 async def test_direct_fastapi_demo_structure_validation(rest_client):
     """Test that demo calls are correctly structured with API parameters."""
-    test_tool_path = "bio/samtools/faidx"
-    response = rest_client.get(f"/tools/{test_tool_path}")
+    test_tool_path = "bio/snpsift/varType"
+    
+    # Fetch demos from the /demos/{wrapper_id} endpoint
+    response = rest_client.get(f"/demos/{test_tool_path}")
     assert response.status_code == 200
     
-    result = response.json()
-    demos = result.get("demos", [])
+    demos = response.json()
     assert len(demos) > 0, f"Expected demos for {test_tool_path}, but got none"
     
     # Validate first demo
@@ -100,6 +99,7 @@ async def test_direct_fastapi_demo_structure_validation(rest_client):
     # Validate the payload structure
     payload = demo["payload"]
     assert payload is not None
+    assert "wrapper_id" in payload # Ensure wrapper_id is in payload
     
     pass
 
@@ -123,21 +123,33 @@ async def test_direct_fastapi_demo_case_endpoint(rest_client):
     
     assert demo_case_response["method"] == "POST"
     assert demo_case_response["endpoint"] == "/tool-processes"
-    assert demo_case_response["payload"]["wrapper_name"] == "bio/samtools/faidx"
+    assert demo_case_response["payload"]["wrapper_id"] == "bio/snpsift/varType" # Changed to snpsift/varType
     
     print("\nDirect FastAPI /demo-case endpoint validated for structure.")
 
-        # 2. Extract payload and prepare for execution
+    # 2. Extract payload and prepare for execution
     payload = demo_case_response["payload"]
     
     # The workdir and input file are created by the /tool-processes endpoint.
     # We will get the actual workdir and output file path from the job result.
-    input_file_name = payload["inputs"][0]
-    output_file_name = payload["outputs"][0]
+    input_file_name = payload["inputs"]["vcf"]
+    output_file_name = payload["outputs"]["vcf"]
 
     try:
         # 3. Submit the job using the extracted payload
-        submit_response = rest_client.post(demo_case_response["endpoint"], json=payload)
+        # The payload from demo_case_response is a UserWrapperRequest,
+        # but /tool-processes expects InternalWrapperRequest.
+        # We need to construct a valid InternalWrapperRequest.
+        internal_payload = InternalWrapperRequest(
+            wrapper_id=payload["wrapper_id"],
+            inputs=payload.get("inputs"),
+            outputs=payload.get("outputs"),
+            params=payload.get("params"),
+            workdir=".", # Placeholder, actual workdir will be managed by server
+            threads=1 # Minimal platform param required
+        )
+
+        submit_response = rest_client.post(demo_case_response["endpoint"], json=internal_payload.model_dump(mode="json"))
         assert submit_response.status_code == 202
         submission_data = submit_response.json()
         job_id = submission_data["job_id"]
@@ -186,21 +198,27 @@ async def test_direct_fastapi_demo_case_endpoint(rest_client):
 
 
 @pytest.mark.asyncio
-async def test_samtools_faidx_wrapper_full_flow(rest_client):
+async def test_snpsift_vartype_wrapper_full_flow(rest_client):
     """
-    End-to-end test for running the 'bio/samtools/faidx' wrapper through the
+    End-to-end test for running the 'bio/snpsift/varType' wrapper through the
     /tool-processes endpoint, verifying job status and output file creation.
     This test now relies on the /tool-processes endpoint to create dummy input files.
     """
     # Construct the UserSnakemakeWrapperRequest payload
-    payload = {
-        "wrapper_name": "bio/samtools/faidx",
-        "inputs": ["genome.fa"],
-        "outputs": ["genome.fa.fai"],
-    }
+    # /tool-processes expects an InternalWrapperRequest
+    wrapper_id = "bio/snpsift/varType"
+    temp_dir = Path(tempfile.mkdtemp())
+    
+    internal_payload = InternalWrapperRequest(
+        wrapper_id=wrapper_id,
+        inputs={"vcf": "in.vcf"},
+        outputs={"vcf": "annotated/out.vcf"},
+        workdir=str(temp_dir), # Pass a temporary workdir
+        threads=1 # Minimal platform param required
+    )
 
     # Submit the job
-    response = rest_client.post("/tool-processes", json=payload)
+    response = rest_client.post("/tool-processes", json=internal_payload.model_dump(mode="json"))
     assert response.status_code == 202
     submission_response = response.json()
     job_id = submission_response["job_id"]
@@ -245,3 +263,6 @@ async def test_samtools_faidx_wrapper_full_flow(rest_client):
     if workdir.exists():
         shutil.rmtree(workdir)
         print(f"Cleaned up temporary directory: {workdir}")
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+        print(f"Cleaned up temporary directory: {temp_dir}")

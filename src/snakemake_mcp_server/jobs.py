@@ -15,22 +15,7 @@ async def run_snakemake_job_in_background(job_id: str, request: InternalWrapperR
     job_store[job_id].status = JobStatus.RUNNING
 
     try:
-        result = await run_wrapper(
-            wrapper_name=request.wrapper_id,
-            workdir=request.workdir,
-            inputs=request.inputs,
-            outputs=request.outputs,
-            params=request.params,
-            log=request.log,
-            threads=request.threads,
-            resources=request.resources,
-            priority=request.priority,
-            shadow_depth=request.shadow_depth,
-            benchmark=request.benchmark,
-            container_img=request.container_img,
-            env_modules=request.env_modules,
-            group=request.group,
-        )
+        result = await run_wrapper(request=request)
         
         # Prepare output file paths
         output_file_paths = []

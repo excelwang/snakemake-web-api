@@ -3,30 +3,30 @@ from ...schemas import DemoCaseResponse, UserWrapperRequest
 
 router = APIRouter()
 
-@router.get("/demo-case", response_model=DemoCaseResponse, operation_id="get_samtools_faidx_demo_case")
-async def get_samtools_faidx_demo_case(request: Request):
+@router.get("/demo-case", response_model=DemoCaseResponse, operation_id="get_snpsift_vartype_demo_case")
+async def get_snpsift_vartype_demo_case(request: Request):
     """
-    Provides a demo case for running the 'bio/samtools/faidx' wrapper via the /tool-processes endpoint,
+    Provides a demo case for running the 'bio/snpsift/varType' wrapper via the /tool-processes endpoint,
     including the request payload and a curl example.
     
     The /tool-processes endpoint will be responsible for creating any necessary dummy input files.
     """
     # Define input and output file names relative to the workdir
-    input_file_name = "genome.fa"
-    output_file_name = "genome.fa.fai"
+    input_file_name = "in.vcf"
+    output_file_name = "annotated/out.vcf"
 
     # Construct the UserSnakemakeWrapperRequest payload
     user_payload = UserWrapperRequest(
-        wrapper_id="bio/samtools/faidx",
-        inputs=[input_file_name], # Relative to workdir
-        outputs=[output_file_name], # Relative to workdir
+        wrapper_id="bio/snpsift/varType",
+        inputs={"vcf": input_file_name}, # Relative to workdir
+        outputs={"vcf": output_file_name}, # Relative to workdir
     )
 
     # Construct the DemoCaseResponse
     demo_case = DemoCaseResponse(
         method="POST",
         endpoint="/tool-processes",
-        payload=user_payload.model_dump(mode="json"), # Pass the Pydantic model's dict representation here
+        payload=user_payload,
         curl_example="" # Will be filled below
     )
 

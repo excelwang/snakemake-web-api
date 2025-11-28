@@ -77,7 +77,8 @@ async def get_tool_meta(tool_name: str, request: Request):
     """
     logger.info(f"Received request to get metadata for tool from cache: {tool_name}")
 
-    cache_file = Path(request.app.state.wrappers_path) / ".parser" / f"{tool_name}.json"
+    cache_dir = Path.home() / ".swa" / "parser"
+    cache_file = cache_dir / f"{tool_name}.json"
 
     if not cache_file.exists():
         raise HTTPException(

@@ -18,6 +18,10 @@ class Job(BaseModel):
     result: Optional[Dict] = None
 
 
+class JobList(BaseModel):
+    jobs: List[Job]
+
+
 class JobSubmissionResponse(BaseModel):
     job_id: str
     status_url: str
@@ -113,7 +117,6 @@ class DemoCaseResponse(BaseModel):
     method: str
     endpoint: str
     payload: UserWrapperRequest
-    user_params: UserProvidedParams
     curl_example: str
 
 

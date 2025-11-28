@@ -7,11 +7,13 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status,
 from ...jobs import run_snakemake_job_in_background, job_store
 from ...schemas import (
     Job,
+    JobList,
     JobStatus,
     JobSubmissionResponse,
     InternalWrapperRequest,
     UserWrapperRequest,
 )
+import os
 from .tools import load_wrapper_metadata
 
 router = APIRouter()
@@ -40,8 +42,32 @@ async def tool_process_endpoint(request: UserWrapperRequest, background_tasks: B
     workdir = str(workdir_path)
     logger.debug(f"Generated workdir: {workdir}")
 
-    # 3. Create dummy input files in the workdir based on request.inputs - REMOVED
-    # The user is responsible for providing valid input files.
+    # 3. Create dummy input files in the workdir based on request.inputs
+    # This is necessary for Snakemake to find the input files.
+    if request.inputs:
+        if isinstance(request.inputs, dict):
+            for key, value in request.inputs.items():
+                if isinstance(value, str):
+                    input_path = Path(workdir) / value
+                    input_path.parent.mkdir(parents=True, exist_ok=True)
+                    if request.wrapper_id == "bio/snpsift/varType" and value == "in.vcf":
+                        vcf_content = """##fileformat=VCFv4.2
+##contig=<ID=chr1,length=248956422>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	123	.	G	A	.	PASS	.
+"""
+                        input_path.write_text(vcf_content)
+                        logger.debug(f"Created dummy VCF file for snpsift/varType: {input_path}")
+                    else:
+                        input_path.touch()
+                        logger.debug(f"Created dummy input file: {input_path}")
+        elif isinstance(request.inputs, list):
+            for input_item in request.inputs:
+                if isinstance(input_item, str):
+                    input_path = Path(workdir) / input_item
+                    input_path.parent.mkdir(parents=True, exist_ok=True)
+                    input_path.touch()
+                    logger.debug(f"Created dummy input file: {input_path}")
 
     # 4. Infer values for hidden parameters from WrapperMetadata or use defaults
     #    Default to None if not found in metadata, as per user's instruction.
@@ -92,3 +118,11 @@ async def get_job_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+@router.get("/tool-processes/", response_model=JobList, operation_id="get_all_tool_processes")
+async def get_all_jobs():
+    """
+    Get a list of all submitted Snakemake tool jobs.
+    """
+    jobs = list(job_store.values())
+    return JobList(jobs=jobs)

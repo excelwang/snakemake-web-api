@@ -76,7 +76,7 @@ def load_cached_wrapper_data(wrappers_dir: str) -> list[tuple[WrapperMetadata, l
                     with open(os.path.join(root, file), 'r') as f:
                         data = json.load(f)
                         wrapper_meta = WrapperMetadata(**data)
-                        demos = [DemoCall(**d) for d in data.get('demos', [])]
+                        demos = [DemoCall(**d) for d in (data.get('demos') or [])]
                         wrapper_data.append((wrapper_meta, demos))
                 except Exception as e:
                     logging.error(f"Failed to load cached wrapper from {file}: {e}")

@@ -61,16 +61,16 @@ def cli(ctx, snakebase_dir):
 
 
 from .cli.parse import parse
-from .cli.rest import rest
+from .cli.run import run
 from .cli.verify import verify
 
 # The native FastAPI implementation with proper Pydantic models
 # is now in the fastapi_app.py file to maintain consistency
 # and follow proper module separation.
-# Only the 'rest' command variant is available for running the server.
+# Only the 'run' command variant is available for running the server.
 
 cli.add_command(parse)
-cli.add_command(rest)
+cli.add_command(run)
 cli.add_command(verify)
 
 

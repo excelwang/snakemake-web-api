@@ -8,7 +8,7 @@ from ..api.main import create_native_fastapi_app
 logger = logging.getLogger(__name__)
 
 @click.command(
-    help="Start the Snakemake server with native FastAPI REST endpoints. "
+    help="Start the Snakemake server with native FastAPI endpoints. "
          "This provides standard REST API endpoints with full OpenAPI documentation."
 )
 @click.option("--host", default="127.0.0.1", help="Host to bind to. Default: 127.0.0.1")
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @click.option("--log-level", default="INFO", type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR']),
               help="Logging level. Default: INFO")
 @click.pass_context
-def rest(ctx, host, port, log_level):
+def run(ctx, host, port, log_level):
     """Start the Snakemake server with native FastAPI REST endpoints."""
     # Reconfigure logging to respect the user's choice
     logging.basicConfig(

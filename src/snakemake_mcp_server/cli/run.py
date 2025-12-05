@@ -11,12 +11,13 @@ logger = logging.getLogger(__name__)
     help="Start the Snakemake server with native FastAPI endpoints. "
          "This provides standard REST API endpoints with full OpenAPI documentation."
 )
-@click.option("--host", default="127.0.0.1", help="Host to bind to. Default: 127.0.0.1")
-@click.option("--port", default=8082, type=int, help="Port to bind to. Default: 8082")
+@click.option("-h", "--host", default="127.0.0.1", help="Host to bind to. Default: 127.0.0.1")
+@click.option("-p", "--port", default=8082, type=int, help="Port to bind to. Default: 8082")
 @click.option("--log-level", default="INFO", type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR']),
               help="Logging level. Default: INFO")
+@click.option("-D", "--daemon", is_flag=True, help="Run the server in the background as a daemon.")
 @click.pass_context
-def run(ctx, host, port, log_level):
+def run(ctx, host, port, log_level, daemon):
     """Start the Snakemake server with native FastAPI REST endpoints."""
     # Reconfigure logging to respect the user's choice
     logging.basicConfig(
@@ -47,11 +48,37 @@ def run(ctx, host, port, log_level):
 
     # Create the native FastAPI app
     app = create_native_fastapi_app(wrappers_path, workflows_dir)
-    
-    # Run with uvicorn
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        log_level=log_level.lower()
-    )
+
+    if daemon:
+        import subprocess
+        # Construct the command to re-execute the current script without the --daemon flag
+        # We need to explicitly pass all relevant arguments that were originally given
+        cmd_args = [sys.executable, "-m", "snakemake_mcp_server.server", "run",
+                    "--host", host, "--port", str(port), "--log-level", log_level]
+        
+        # Detach the process from the current session
+        # Use os.setsid for Unix-like systems and DETACHED_PROCESS for Windows
+        if sys.platform == "win32":
+            creationflags = subprocess.DETACHED_PROCESS
+            preexec_fn = None
+        else:
+            creationflags = 0
+            preexec_fn = os.setsid
+            
+        process = subprocess.Popen(cmd_args,
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL,
+                                   stdin=subprocess.DEVNULL,
+                                   preexec_fn=preexec_fn,
+                                   creationflags=creationflags,
+                                   close_fds=True)
+        logger.info(f"Server started in daemon mode on http://{host}:{port}. PID: {process.pid}")
+    else:
+        # Run with uvicorn in foreground
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level=log_level.lower()
+        )
+

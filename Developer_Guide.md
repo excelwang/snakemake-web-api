@@ -1,8 +1,7 @@
 # Developer Guide
 
 ## 架构概述
-   * server.py：CLI 应用程序，定义 `parse`, `rest`, `mcp`, `verify` 四个子命令入口点。
-   * mcp_factory.py：将 FastAPI 应用程序转换为 MCP (Model Context Protocol) 服务器。
+   * server.py：CLI 应用程序，定义 `parse`, `rest`, `verify` 三个子命令入口点。
    * api/main.py：创建原生 FastAPI 应用程序，定义 REST API 路由。
    * api/routes/：包含不同的 API 路由实现 (health, demo, tools, tool_processes, workflow_processes)。
    * wrapper_runner.py：执行单个 wrapper 的逻辑（动态 Snakefile 生成）。
@@ -34,7 +33,6 @@
 ## CLI 命令结构
    * `parse`: 解析 snakemake-wrappers 目录中的包装器，生成缓存元数据。
    * `rest`: 启动 FastAPI REST API 服务器。
-   * `mcp`: 启动 MCP 协议服务器，通过 FastMCP.from_fastapi() 转换 FastAPI 应用。
    * `verify`: 验证安装和配置是否正确。
 
 ## API 路由详解
@@ -50,7 +48,7 @@
    * 异步任务如何在任务结果中记录错误信息。
 
 ## 测试策略
-   * conftest.py 和共享 fixture（mcp_server、http_client、test_files、wrappers_path、workflows_dir）的解释。
+   * conftest.py 和共享 fixture（test_files、wrappers_path、workflows_dir）的解释。
    * 为什么 fixture 是 function 作用域以实现隔离。
    * 如何为 wrapper 和工作流添加新测试。
    * SNAKEMAKE_WRAPPERS_PATH 环境变量对测试的重要性。

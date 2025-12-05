@@ -103,7 +103,7 @@ chr1	123	.	G	A	.	PASS	.
     job = Job(job_id=job_id, status=JobStatus.ACCEPTED, created_time=datetime.now(timezone.utc))
     job_store[job_id] = job
 
-    background_tasks.add_task(run_snakemake_job_in_background, job_id, internal_request, http_request.app.state.wrappers_path)
+    background_tasks.add_task(run_snakemake_job_in_background, job_id, internal_request)
     
     status_url = f"/tool-processes/{job_id}"
     response.headers["Location"] = status_url

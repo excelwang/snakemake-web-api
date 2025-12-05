@@ -1,10 +1,10 @@
 # Snakemake Web API
 
-The Snakemake Web API provides robust endpoints for remotely executing Snakemake wrappers and full Snakemake workflows. This allows for flexible integration of Snakemake-based bioinformatics pipelines into larger systems or applications. The API is available both as a traditional REST API and as an MCP (Model Context Protocol) server.
+The Snakemake Web API provides robust endpoints for remotely executing Snakemake wrappers and full Snakemake workflows. This allows for flexible integration of Snakemake-based bioinformatics pipelines into larger systems or applications. The API is available as a traditional REST API.
 
 ## Key Features
 
-*   **Dual API Support:** Both REST API and MCP (Model Context Protocol) endpoints are available for maximum flexibility.
+*   **REST API Support:** REST API endpoints are available for maximum flexibility.
 *   **`run_snakemake_wrapper` Tool:** Execute individual Snakemake wrappers by name. This is ideal for running specific bioinformatics tools wrapped for Snakemake.
 *   **`run_snakemake_workflow` Tool:** Execute entire Snakemake workflows. This enables running complex, multi-step pipelines remotely.
 *   **Flexible Parameter Passing:** Both tools accept common Snakemake parameters such as `inputs`, `outputs`, `params`, `threads`, `log`, `extra_snakemake_args`, `container`, `benchmark`, `resources`, `shadow`, and `target_rule`.
@@ -146,13 +146,6 @@ To start the REST API server:
 
 ```bash
 swa rest --host 127.0.0.1 --port 8082
-```
-
-### MCP Protocol Server
-To start the MCP (Model Context Protocol) server:
-
-```bash
-swa mcp --host 127.0.0.1 --port 8083
 ```
 
 ### Parsing Wrappers

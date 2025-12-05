@@ -1,61 +1,34 @@
 import pytest
-import asyncio
-from fastmcp import Client
 import os
 
 
-@pytest.mark.asyncio
-async def test_get_tool_meta_api(http_client: Client):
+def test_get_tool_meta_api(fastapi_client):
     """测试获取特定tool metadata的API"""
     # 调用新添加的get_tool_meta工具，使用存在的tool路径
-    result = await asyncio.wait_for(
-        http_client.call_tool(
-            "get_tool_meta",
-            {
-                "tool_path": "bio/samtools/stats"  # Use a known tool path that exists
-            }
-        ),
-        timeout=30  # 30秒超时
-    )
-    
-    # 验证结果结构
-    assert hasattr(result, 'data'), "Result should have data attribute"
+    response = fastapi_client.get("/tools/bio/samtools/stats")
+    assert response.status_code == 200
     
     # 检查返回数据结构 - data is a Pydantic model
-    data = result.data
-    assert hasattr(data, 'name'), "Response should have name"
-    assert hasattr(data, 'path'), "Response should have path"
+    data = response.json()
+    assert "id" in data, "Response should have id"
+    assert "info" in data, "Response should have info"
+    assert "user_params" in data, "Response should have user_params"
     
     # 验证返回的tool信息
-    assert data.path == "bio/samtools/stats", f"Path should be 'bio/samtools/stats', got {data.path}"
-    assert isinstance(data.name, str), "Tool name should be string"
+    assert data["id"] == "bio/samtools/stats", f"Path should be 'bio/samtools/stats', got {data['id']}"
+    assert isinstance(data["info"]["name"], str), "Tool name should be string"
     
-    print(f"Tool name: {data.name}")
-    print(f"Tool path: {data.path}")
-    print(f"Tool description: {data.description}")
+    print(f"Tool id: {data['id']}")
+    print(f"Tool name: {data['info']['name']}")
+    print(f"Tool description: {data['info']['description']}")
     
     # 这个tool應該有基本的input/output/params信息
-    print(f"Tool input: {data.input}")
-    print(f"Tool output: {data.output}")
+    print(f"Tool input: {data['user_params']['inputs']}")
+    print(f"Tool output: {data['user_params']['outputs']}")
 
 
-@pytest.mark.asyncio
-async def test_get_tool_meta_not_found(http_client: Client):
+def test_get_tool_meta_not_found(fastapi_client):
     """测试获取不存在的tool metadata的错误处理"""
-    try:
-        # 尝試獲取不存在的tool
-        result = await asyncio.wait_for(
-            http_client.call_tool(
-                "get_tool_meta",
-                {
-                    "tool_path": "nonexistent/tool"  # 不存在的tool
-                }
-            ),
-            timeout=30
-        )
-        # 如果沒有拋出異常，說明測試失敗
-        assert False, "Expected an error for non-existent tool"
-    except Exception as e:
-        # 應該收到404錯誤
-        assert "404" in str(e) or "not found" in str(e).lower(), f"Expected 404 error, got: {e}"
-        print(f"Correctly received error for non-existent tool: {e}")
+    response = fastapi_client.get("/tools/nonexistent/tool")
+    assert response.status_code == 404
+    assert "Tool metadata cache not found for" in response.json()["detail"]

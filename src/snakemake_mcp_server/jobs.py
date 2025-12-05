@@ -6,7 +6,7 @@ from .schemas import JobStatus, InternalWrapperRequest
 # In-memory store for jobs
 job_store = {}
 
-async def run_snakemake_job_in_background(job_id: str, request: InternalWrapperRequest, wrappers_path: str):
+async def run_snakemake_job_in_background(job_id: str, request: InternalWrapperRequest):
     """
     A wrapper function to run the snakemake job in the background and update job store.
     """

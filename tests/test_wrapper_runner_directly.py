@@ -4,8 +4,6 @@ import shutil
 import tempfile
 from pathlib import Path
 
-SNAKEBASE_DIR = "/root/snakemake-mcp-server/snakebase"
-
 @pytest.fixture
 def temp_dir():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -16,12 +14,6 @@ def create_dummy_wrapper(tmpdir: Path, wrapper_name: str, content: str):
     wrapper_path.mkdir(parents=True, exist_ok=True)
     (wrapper_path / "Snakefile").write_text(content)
     return str(wrapper_path)
-
-@pytest.fixture
-def wrappers_path():
-    return os.path.join(SNAKEBASE_DIR, "snakemake-wrappers")
-
-
 
 
 @pytest.fixture
@@ -63,16 +55,16 @@ async def test_samtools_faidx_self_contained(self_contained_faidx_data, run_wrap
     input_filename = os.path.basename(input_file)
     output_filename = os.path.basename(output_file)
     input_path = os.path.join(workdir, input_filename)
-    output_path = os.path.join(workdir, output_filename)
+    # output_path is relative to workdir for run_wrapper_test now
     
     shutil.copy2(input_file, input_path)
 
     result = await wrapper_runner(
-        wrapper_name="bio/samtools/faidx",
+        wrapper_id="bio/samtools/faidx",
         inputs=[input_filename],
-        outputs=[output_path]
+        outputs=[output_filename] # Pass filename, not full path
     )
 
     assert result["status"] == "success"
     assert result["exit_code"] == 0
-    assert os.path.exists(output_path)
+    assert os.path.exists(os.path.join(workdir, output_filename))

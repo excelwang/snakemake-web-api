@@ -26,12 +26,6 @@ except ImportError as e:
     logger.error(f"Could not import runner module: {e}")
     sys.exit(1)
 
-# The native FastAPI implementation with proper Pydantic models
-# is now in the fastapi_app.py file to maintain consistency
-# and follow proper module separation.
-
-from .mcp_factory import create_mcp_from_fastapi
-
 def validate_paths(snakebase_dir):
     """Validate the snakebase directory structure."""
     snakebase_path = Path(snakebase_dir).resolve()
@@ -45,7 +39,7 @@ def validate_paths(snakebase_dir):
     return str(wrappers_path), str(workflows_dir)
 
 @click.group(
-    help="Snakemake MCP Server - A server for running Snakemake wrappers and workflows via MCP protocol."
+    help="Snakemake API Server - A server for running Snakemake wrappers and workflows."
 )
 @click.option(
     '--snakebase-dir', 
@@ -56,7 +50,7 @@ def validate_paths(snakebase_dir):
 )
 @click.pass_context
 def cli(ctx, snakebase_dir):
-    """Main CLI group for Snakemake MCP Server."""
+    """Main CLI group for Snakemake API Server."""
     ctx.ensure_object(dict)
     wrappers_path, workflows_dir = validate_paths(snakebase_dir)
     
@@ -68,15 +62,15 @@ def cli(ctx, snakebase_dir):
 
 from .cli.parse import parse
 from .cli.rest import rest
-from .cli.mcp import mcp
 from .cli.verify import verify
 
-# Note: The original direct MCP server is no longer supported as we're using the FastAPI-first approach
-# Only the two new command variants are available: rest and mcp
+# The native FastAPI implementation with proper Pydantic models
+# is now in the fastapi_app.py file to maintain consistency
+# and follow proper module separation.
+# Only the 'rest' command variant is available for running the server.
 
 cli.add_command(parse)
 cli.add_command(rest)
-cli.add_command(mcp)
 cli.add_command(verify)
 
 

@@ -31,7 +31,7 @@ This command:
 - Extracts metadata from `meta.yaml` files
 - Generates demo calls for each wrapper
 - Caches the data to `~/.swa/parser/` directory
-- This cache is used by both REST and MCP servers to provide wrapper information quickly
+- This cache is used by the REST server to provide wrapper information quickly
 
 ### `swa rest`
 
@@ -53,27 +53,6 @@ When running, this server provides:
 - Standard REST API endpoints
 - Interactive OpenAPI documentation at `http://[host]:[port]/docs`
 - All Snakemake functionality as REST API calls
-
-### `swa mcp`
-
-Starts the Snakemake server with MCP (Model Context Protocol) support. This provides MCP protocol endpoints derived from FastAPI definitions.
-
-```bash
-swa mcp \
-    --host 127.0.0.1 \
-    --port 8083 \
-    --log-level INFO
-```
-
-Options:
-- `--host`: Host to bind to (default: 127.0.0.1)
-- `--port`: Port to bind to (default: 8083)
-- `--log-level`: Logging level (DEBUG, INFO, WARNING, ERROR; default: INFO)
-
-When running, this server provides:
-- MCP protocol endpoints at `http://[host]:[port]/mcp`
-- MCP tools for Snakemake wrapper and workflow execution
-- Compatibility with MCP-enabled clients
 
 ### `swa verify`
 

@@ -203,10 +203,8 @@ def verify(ctx, log_level, dry_run, by_api, fast_fail, force, no_cache, include)
                 try:
                     payload = demo.payload
                     result = asyncio.run(run_demo(
-                        wrapper_name=payload.wrapper_id,
-                        inputs=payload.inputs,
-                        outputs=payload.outputs,
-                        params=payload.params,
+                        user_request=payload,
+                        platform_params=wrapper.platform_params,
                         demo_workdir=os.path.join(wrappers_path_str, payload.wrapper_id, "test")
                     ))
                     if result.get("status") == "success":

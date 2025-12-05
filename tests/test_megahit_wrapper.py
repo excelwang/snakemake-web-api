@@ -22,7 +22,7 @@ async def test_megahit_wrapper(run_wrapper_test):
     output_file = os.path.join("assembly", "final.contigs.fasta")
 
     result = await wrapper_runner(
-        wrapper_name="bio/megahit",
+        wrapper_id="bio/megahit",
         inputs={
             "reads": ["sample1_R1.fastq.gz", "sample1_R2.fastq.gz"]
         },

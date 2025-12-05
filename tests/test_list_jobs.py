@@ -43,7 +43,7 @@ async def test_list_jobs_with_one_job(rest_client: TestClient):
         params={}
     )
     
-    response = rest_client.post("/tool-processes", json=request.dict())
+    response = rest_client.post("/tool-processes", json=request.model_dump())
     assert response.status_code == 202, "Failed to submit job"
     job_submission_response = response.json()
     job_id = job_submission_response["job_id"]

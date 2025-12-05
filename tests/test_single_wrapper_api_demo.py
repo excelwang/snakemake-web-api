@@ -23,7 +23,7 @@ async def test_single_demo_api_flow(rest_client):
     logging.info("Starting simplified demo API test...")
 
     # Directly test a wrapper known to have a demo
-    wrapper_id = "bio/samtools/faidx" # Use wrapper_id consistently
+    wrapper_id = "phys/root/filter" # Use wrapper_id consistently
     
     # Fetch demos for this specific wrapper
     demos_response = rest_client.get(f"/demos/{wrapper_id}")

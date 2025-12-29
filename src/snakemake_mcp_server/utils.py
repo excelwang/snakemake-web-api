@@ -70,6 +70,66 @@ def prepare_isolated_workdir(source_dir: str, execution_dir: str):
                     shutil.copy2(item, target)
 
 
+async def sync_workdir_to_s3(workdir: str, s3_prefix: str):
+    """
+    Syncs the local execution directory to S3 using boto3.
+    Follows symlinks to ensure linked data is uploaded.
+    Runs in a separate thread to avoid blocking the event loop.
+    """
+    import asyncio
+    import boto3
+    from urllib.parse import urlparse
+    import os
+    
+    logger.info(f"Pre-provisioning data (boto3): {workdir} -> {s3_prefix}")
+    
+    def _do_sync():
+        try:
+            # Parse S3 URI
+            parsed = urlparse(s3_prefix)
+            bucket_name = parsed.netloc
+            prefix = parsed.path.lstrip('/')
+
+            # Initialize S3 client
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+                endpoint_url=os.environ.get("AWS_ENDPOINT_URL"),
+            )
+
+            workdir_path = Path(workdir)
+            
+            # Walk through the directory and upload files.
+            # followlinks=True is CRITICAL here because the isolation dir uses symlinks.
+            for root, dirs, files in os.walk(workdir, followlinks=True):
+                for file in files:
+                    local_path = Path(root) / file
+                    
+                    # Exclude .snakemake and log files from the upload
+                    if '.snakemake' in local_path.parts or local_path.suffix == '.log':
+                        continue
+                    
+                    # Compute relative path for S3 key
+                    rel_path = local_path.relative_to(workdir_path)
+                    s3_key = os.path.join(prefix, str(rel_path))
+                    
+                    logger.debug(f"Uploading {local_path} -> s3://{bucket_name}/{s3_key}")
+                    
+                    # Use upload_file which handles large files efficiently
+                    s3_client.upload_file(str(local_path), bucket_name, s3_key)
+            
+            logger.info(f"S3 pre-provisioning complete for {s3_prefix}")
+            
+        except Exception as e:
+            logger.error(f"Error during S3 pre-provisioning with boto3: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+    # Run the blocking _do_sync in a separate thread
+    await asyncio.to_thread(_do_sync)
+
+
 def extract_response_status(data: Any) -> Optional[str]:
     """
     Extract status from response data, handling both structured models and dictionaries.

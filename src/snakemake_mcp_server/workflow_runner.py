@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Optional, Union
 import yaml
 import collections.abc
+from .utils import sync_workdir_to_s3
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +32,16 @@ async def run_workflow(
     timeout: int = 3600,
     job_id: Optional[str] = None,
     workdir: Optional[str] = None,
+    workflow_profile: Optional[str] = None,
+    prefill: bool = False,
 ) -> Dict:
     """
     Executes a Snakemake workflow by merging a config object with the base
     config.yaml and running Snakemake via asyncio.create_subprocess_exec.
     Outputs are redirected to a log file for real-time access.
     If 'workdir' is provided, execution happens there for isolation.
+    Support for 'workflow_profile' allows K8s/S3 execution.
+    'prefill' enables automatic S3 data provisioning.
     """
     temp_config_path = None
     log_file_path = None
@@ -98,6 +103,50 @@ async def run_workflow(
             "--nocolor",
             "--printshellcmds",
         ]
+
+        if workflow_profile:
+            # 1. Search priority for the profile
+            local_profile_path = execution_path / "workflow" / "profiles" / workflow_profile
+            global_swa_profile_path = Path.home() / ".swa" / "profiles" / workflow_profile
+            
+            actual_profile_path = None
+            if local_profile_path.exists():
+                actual_profile_path = local_profile_path
+            elif global_swa_profile_path.exists():
+                actual_profile_path = global_swa_profile_path
+            
+            # 2. Add profile to command
+            if actual_profile_path:
+                command.extend(["--workflow-profile", str(actual_profile_path)])
+            else:
+                command.extend(["--workflow-profile", workflow_profile])
+
+            # 3. Handle dynamic S3 prefix and pre-provisioning based on profile config
+            if actual_profile_path and (actual_profile_path / "config.yaml").exists():
+                try:
+                    with open(actual_profile_path / "config.yaml", 'r') as f:
+                        profile_config = yaml.safe_load(f) or {}
+                    
+                    common_prefix = profile_config.get("default-storage-provider") == "s3" and profile_config.get("default-storage-prefix")
+                    if not common_prefix: # Fallback: check if s3 is in the prefix string anyway
+                        prefix_val = profile_config.get("default-storage-prefix", "")
+                        if prefix_val.startswith("s3://"):
+                            common_prefix = prefix_val
+
+                    if common_prefix:
+                        # Construct dynamic prefix: base_prefix/swa-jobs/{job_id}/
+                        base_prefix = common_prefix.rstrip('/')
+                        dynamic_prefix = f"{base_prefix}/swa-jobs/{job_id or 'anonymous'}/"
+                        
+                        # Pre-provisioning: upload current workdir to S3 ONLY IF prefill is enabled
+                        if prefill and workdir:
+                            await sync_workdir_to_s3(str(execution_path), dynamic_prefix)
+                        
+                        # Override the storage prefix from the profile
+                        command.extend(["--default-storage-prefix", dynamic_prefix])
+                        logger.info(f"Using dynamic S3 prefix: {dynamic_prefix} (Prefill: {prefill})")
+                except Exception as e:
+                    logger.error(f"Failed to parse profile config for prefix extraction: {e}")
 
         if use_conda:
             command.append("--use-conda")

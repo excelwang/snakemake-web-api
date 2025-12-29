@@ -6,6 +6,7 @@ import tempfile
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status, Request
 from fastapi.responses import FileResponse
 from ...workflow_runner import run_workflow
@@ -16,7 +17,7 @@ from ...utils import prepare_isolated_workdir
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-async def run_workflow_in_background(job_id: str, request: UserWorkflowRequest, workflows_dir: str):
+async def run_workflow_in_background(job_id: str, request: UserWorkflowRequest, workflows_dir: str, workflow_profile: Optional[str] = None, prefill: bool = False):
     """
     Sets up an isolated execution environment and runs the workflow.
     """
@@ -46,14 +47,12 @@ async def run_workflow_in_background(job_id: str, request: UserWorkflowRequest, 
                 use_conda=request.use_conda,
                 use_cache=request.use_cache,
                 job_id=job_id,
-                workdir=execution_workdir
+                workdir=execution_workdir,
+                workflow_profile=workflow_profile,
+                prefill=prefill
             )
             return result
         finally:
-            # Cleanup: remove the temporary execution directory after completion
-            # (Optional: you might want to keep it for a while if user needs outputs)
-            # For now, let's keep it until we have a better way to serve output files
-            # or just rely on the absolute paths if they were provided.
             logger.debug(f"Execution finished. Isolated workdir: {execution_workdir}")
 
     await run_and_update_job(job_id, task)
@@ -86,11 +85,17 @@ async def create_workflow_process(
     )
     job_store[job_id] = job
 
+    # Get the global profile and prefill from app state
+    workflow_profile = getattr(http_request.app.state, 'workflow_profile', None)
+    prefill = getattr(http_request.app.state, 'prefill', False)
+
     background_tasks.add_task(
         run_workflow_in_background,
         job_id,
         request,
-        http_request.app.state.workflows_dir
+        http_request.app.state.workflows_dir,
+        workflow_profile,
+        prefill
     )
     
     status_url = f"/workflow-processes/{job_id}"

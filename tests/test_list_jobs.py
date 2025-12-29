@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 import logging
 import json
+from pathlib import Path
 from snakemake_mcp_server.api.main import create_native_fastapi_app
 from snakemake_mcp_server.schemas import UserWrapperRequest
 

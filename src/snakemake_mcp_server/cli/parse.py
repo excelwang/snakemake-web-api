@@ -32,6 +32,7 @@ def _parse_and_cache_wrapper(wrapper_path: Path, wrappers_base_path: Path):
         notes_data = meta_data.get('notes')
         if isinstance(notes_data, str):
             notes_data = [line.strip() for line in notes_data.split('\n') if line.strip()]
+            meta_data['notes'] = notes_data # Update meta_data with processed notes
 
         basic_demo_calls = generate_demo_calls_for_wrapper(str(wrapper_path), str(wrappers_base_path))
         num_demos = len(basic_demo_calls) if basic_demo_calls else 0
@@ -41,9 +42,14 @@ def _parse_and_cache_wrapper(wrapper_path: Path, wrappers_base_path: Path):
             for call in basic_demo_calls
         ] if num_demos > 0 else None
         
+        # Prepare info data by merging meta_data and ensuring name exists
+        info_dict = meta_data.copy()
+        if 'name' not in info_dict:
+            info_dict['name'] = wrapper_path.name
+            
         wrapper_meta = WrapperMetadata(
             id=wrapper_rel_path,
-            info=WrapperInfo(name=meta_data.get('name', wrapper_path.name), **meta_data),
+            info=WrapperInfo(**info_dict),
             user_params=UserProvidedParams(**meta_data),
             platform_params=PlatformRunParams(**meta_data)
         )
@@ -79,7 +85,12 @@ def _parse_and_cache_workflow(workflow_path: Path, workflows_base_path: Path):
         if meta_path.exists():
             with open(meta_path, 'r', encoding='utf-8') as f:
                 meta_data = yaml.safe_load(f) or {}
-            info_data = meta_data.get("info")
+            info_data = meta_data.get("info") or {
+                "name": meta_data.get("name", workflow_id),
+                "description": meta_data.get("description"),
+                "authors": meta_data.get("authors"),
+                "notes": meta_data.get("notes")
+            }
             params_schema = meta_data.get("params_schema")
 
         # 3. Parse demos/ directory
@@ -94,6 +105,14 @@ def _parse_and_cache_workflow(workflow_path: Path, workflows_base_path: Path):
                     "description": demo_config.get("__description__"), # Optional description key within demo file
                     "config": {k: v for k, v in demo_config.items() if k != "__description__"}
                 })
+        
+        # fallback to config/config.yaml as a demo if no demos found
+        if not demos_list and config_path.exists():
+            demos_list.append({
+                "name": "default",
+                "description": "Default configuration from config/config.yaml",
+                "config": default_config
+            })
         
         # 4. Assemble and cache
         cache_data = {

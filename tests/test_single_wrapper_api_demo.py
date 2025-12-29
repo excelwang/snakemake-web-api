@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 import logging
 import json
+from pathlib import Path
 from snakemake_mcp_server.api.main import create_native_fastapi_app
 
 @pytest.fixture
@@ -25,21 +26,26 @@ async def test_single_demo_api_flow(rest_client):
     logging.info("Starting simplified demo API test...")
 
     # Directly test a wrapper known to have a demo
-    wrapper_path = "bio/samtools/faidx"
+    wrapper_path = "bio/snpsift/varType"
     
     # Fetch the full metadata for this specific wrapper
     metadata_response = rest_client.get(f"/tools/{wrapper_path}")
     assert metadata_response.status_code == 200, f"Failed to get metadata for {wrapper_path}"
     
     metadata = metadata_response.json()
+    logging.info(f"Received metadata for {wrapper_path}: {metadata.get('id')}")
     
-    # Print the received metadata for debugging
-    logging.info(f"Received metadata for {wrapper_path}:\n{json.dumps(metadata, indent=2)}")
+    # Fetch demos from the separate endpoint
+    demos_response = rest_client.get(f"/demos/{wrapper_path}")
+    assert demos_response.status_code == 200, f"Failed to get demos for {wrapper_path}"
     
-    demos = metadata.get("demos")
+    demos = demos_response.json()
     
-    assert demos is not None, "The 'demos' field is missing from the response."
-    assert isinstance(demos, list), "The 'demos' field is not a list."
-    assert len(demos) > 0, "The 'demos' list is empty, but was expected to have content."
+    # Print the received demos for debugging
+    logging.info(f"Received demos for {wrapper_path}:\n{json.dumps(demos, indent=2)}")
+    
+    assert demos is not None, "The demos response is None."
+    assert isinstance(demos, list), "The demos response is not a list."
+    assert len(demos) > 0, "The demos list is empty, but was expected to have content."
 
     logging.info(f"Successfully found {len(demos)} demo(s) for wrapper {wrapper_path}.")

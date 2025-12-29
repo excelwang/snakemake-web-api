@@ -7,6 +7,13 @@ from pathlib import Path
 import pytest_asyncio
 from snakemake_mcp_server.schemas import InternalWrapperRequest
 
+@pytest.fixture(scope="module")
+def monkeypatch_module():
+    from _pytest.monkeypatch import MonkeyPatch
+    mp = MonkeyPatch()
+    yield mp
+    mp.undo()
+
 SNAKEBASE_DIR = os.environ.get("SNAKEBASE_DIR")
 
 @pytest.fixture(scope="session")

@@ -17,11 +17,11 @@ async def get_wrapper_demos(wrapper_id: str, request: Request):
     """
     logger.info(f"Received request to get demos for wrapper: {wrapper_id}")
 
-    cache_dir = Path.home() / ".swa" / "parser"
+    cache_dir = Path.home() / ".swa" / "cache" / "wrappers"
     if not cache_dir.exists():
         raise HTTPException(
             status_code=404,
-            detail=f"Parser cache directory not found. Run 'swa parse' to generate the cache."
+            detail=f"Parser cache directory not found at '{cache_dir}'. Run 'swa parse' to generate the cache."
         )
 
     cache_file = cache_dir / f"{wrapper_id}.json"

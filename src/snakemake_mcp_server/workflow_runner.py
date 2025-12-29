@@ -73,6 +73,7 @@ def run_workflow(
             "snakemake", 
             "--snakefile", str(main_snakefile),
             "--configfile", str(temp_config_path),
+            "--cores", "1",
             "--use-conda",
             "--nocolor",
             "--printshellcmds",

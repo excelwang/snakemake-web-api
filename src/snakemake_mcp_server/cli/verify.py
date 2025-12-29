@@ -56,7 +56,7 @@ def verify(ctx, log_level, dry_run, by_api, fast_fail, force, no_cache, include)
     logger.setLevel(log_level)
     logger.info("Starting verification process...")
 
-    cache_dir = Path.home() / ".swa" / "parser"
+    cache_dir = Path.home() / ".swa" / "cache" / "wrappers"
     if not cache_dir.exists():
         logger.error(f"Parser cache directory not found at: {cache_dir}. Run 'swa parse' first.")
         sys.exit(1)

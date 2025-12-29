@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 import yaml
 import time
+from unittest.mock import patch
 
 from snakemake_mcp_server.api.main import create_native_fastapi_app
 from snakemake_mcp_server.schemas import UserWorkflowRequest
@@ -13,8 +14,16 @@ from snakemake_mcp_server.schemas import UserWorkflowRequest
 @pytest.fixture(scope="module")
 def setup_test_environment():
     """Sets up a temporary snakebase with a test workflow for the API tests."""
+    # Use a temporary directory for everything
     with tempfile.TemporaryDirectory() as temp_dir:
-        snakebase_dir = Path(temp_dir)
+        temp_path = Path(temp_dir)
+        
+        # We will mock Path.home() to return this temp directory
+        # This way, all code using Path.home() / ".swa" will use our temp dir
+        mock_home = temp_path / "fake_home"
+        mock_home.mkdir()
+        
+        snakebase_dir = temp_path / "snakebase"
         wrappers_dir = snakebase_dir / "snakemake-wrappers"
         workflows_dir = snakebase_dir / "snakemake-workflows"
         wrappers_dir.mkdir(parents=True)
@@ -68,30 +77,39 @@ rule create_output:
         # Create results dir
         (workflow_path / "results").mkdir()
 
-        # Yield the paths
-        yield str(wrappers_dir), str(workflows_dir)
-        # Teardown is handled by TemporaryDirectory context manager
+        # Yield everything needed
+        yield {
+            "wrappers_path": str(wrappers_dir),
+            "workflows_path": str(workflows_dir),
+            "mock_home": mock_home
+        }
 
 
 @pytest.fixture(scope="module")
 def api_client(setup_test_environment):
     """Create a TestClient for the FastAPI app with the test environment."""
-    wrappers_path, workflows_path = setup_test_environment
-    # The API needs a parser cache to exist, so we run the parser.
-    # We do this by invoking the parse command function directly.
-    from snakemake_mcp_server.cli.parse import parse as parse_command
-    from click.testing import CliRunner
+    env = setup_test_environment
     
-    runner = CliRunner()
-    # Mock the context object that the CLI expects
-    class MockContext:
-        obj = {'WRAPPERS_PATH': wrappers_path, 'WORKFLOWS_DIR': workflows_path}
-    
-    result = runner.invoke(parse_command, [], obj=MockContext().obj)
-    assert result.exit_code == 0, f"Parser command failed: {result.output}"
+    # We use multiple patches to ensure total isolation
+    with patch("pathlib.Path.home", return_value=env["mock_home"]):
+        # Also need to patch it in all modules that might have already imported it or use it
+        # Actually, if they use Path.home() call, the patch above is enough.
+        
+        # Now run the parser to populate our fake home
+        from snakemake_mcp_server.cli.parse import parse as parse_command
+        from click.testing import CliRunner
+        
+        runner = CliRunner()
+        class MockContext:
+            obj = {'WRAPPERS_PATH': env["wrappers_path"], 'WORKFLOWS_DIR': env["workflows_path"]}
+        
+        result = runner.invoke(parse_command, [], obj=MockContext().obj)
+        assert result.exit_code == 0, f"Parser command failed: {result.output}"
 
-    app = create_native_fastapi_app(wrappers_path, workflows_path)
-    return TestClient(app)
+        app = create_native_fastapi_app(env["wrappers_path"], env["workflows_path"])
+        # We must keep the patch active while using the client because routes call Path.home()
+        with TestClient(app) as client:
+            yield client
 
 
 def test_list_workflows(api_client):
@@ -157,9 +175,7 @@ def test_workflow_process_async(api_client):
     assert job_status == "completed", f"Job did not complete. Final data: {final_data}"
     assert final_data["result"]["status"] == "success"
 
-    # 4. Verify output file content (need to find the temp dir)
-    # This is tricky because the TestClient doesn't expose the app state easily.
-    # For a true e2e test, we'd need a more complex setup.
-    # But we can infer from the successful run that the logic worked.
-    # The unit tests for `run_workflow` already verify the file content.
-    assert "echo hello async > results/output.txt" in final_data["result"]["stdout"]
+    # 4. Verify output file content
+    # Snakemake outputs shell commands to stderr by default when using --printshellcmds
+    combined_output = final_data["result"]["stdout"] + final_data["result"]["stderr"]
+    assert "echo hello async > results/output.txt" in combined_output

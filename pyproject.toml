@@ -5,7 +5,6 @@ description = "Web API for running Snakemake workflows and wrappers."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastmcp",
     "snakemake",
     "click",
     "snakemake-wrapper-utils>=0.8.0",
@@ -57,6 +56,5 @@ asyncio_default_fixture_loop_scope = "function"
 markers = [
     "slow: marks tests as slow",
     "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests",
-    "mcp: marks tests that rely on the MCP server"
+    "unit: marks tests as unit tests"
 ]

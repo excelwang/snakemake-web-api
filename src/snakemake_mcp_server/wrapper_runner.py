@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 async def run_wrapper(
     request: InternalWrapperRequest,
     timeout: int = 600,
+    job_id: Optional[str] = None,
 ) -> Dict:
     """
     Executes a single Snakemake wrapper by generating a Snakefile and running
@@ -138,6 +139,11 @@ async def run_wrapper(
             stderr=asyncio.subprocess.PIPE,
             cwd=execution_workdir
         )
+
+        # Register process for potential cancellation
+        if job_id:
+            from .jobs import active_processes
+            active_processes[job_id] = process
 
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout)

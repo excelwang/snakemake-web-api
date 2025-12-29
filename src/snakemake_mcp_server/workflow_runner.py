@@ -1,9 +1,9 @@
-import subprocess
+import asyncio
 import tempfile
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 import yaml
 import collections.abc
 
@@ -20,7 +20,7 @@ def deep_merge(source, destination):
             destination[key] = value
     return destination
 
-def run_workflow(
+async def run_workflow(
     workflow_id: str,
     workflows_dir: str,
     config_overrides: dict,
@@ -28,10 +28,11 @@ def run_workflow(
     cores: Union[int, str] = "all",
     use_conda: bool = True,
     timeout: int = 3600,
+    job_id: Optional[str] = None,
 ) -> Dict:
     """
     Executes a Snakemake workflow by merging a config object with the base
-    config.yaml and running Snakemake with a temporary config file.
+    config.yaml and running Snakemake via asyncio.create_subprocess_exec.
     """
     temp_config_path = None
     try:
@@ -88,46 +89,45 @@ def run_workflow(
 
         logger.info(f"Executing command: {' '.join(command)} in {workflow_path}")
         
-        result = subprocess.run(
-            command, 
-            check=True, 
-            capture_output=True, 
-            text=True,
-            timeout=timeout,
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             cwd=workflow_path
         )
-        
-        return {
-            "status": "success",
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exit_code": result.returncode
-        }
 
-    except subprocess.CalledProcessError as e:
-        error_msg = f"Snakemake workflow execution failed with exit code {e.returncode}"
-        logger.error(error_msg)
-        logger.error(f"Stdout:\n{e.stdout}")
-        logger.error(f"Stderr:\n{e.stderr}")
-        return {
-            "status": "failed",
-            "stdout": e.stdout or "",
-            "stderr": e.stderr or "",
-            "exit_code": e.returncode,
-            "error_message": error_msg
-        }
-    
-    except subprocess.TimeoutExpired as e:
-        error_msg = f"Snakemake workflow execution timed out after {timeout} seconds"
-        logger.error(error_msg)
-        return {
-            "status": "failed",
-            "stdout": e.stdout.decode() if e.stdout else "",
-            "stderr": e.stderr.decode() if e.stderr else "",
-            "exit_code": -1,
-            "error_message": error_msg
-        }
-    
+        # Register process for potential cancellation
+        if job_id:
+            from .jobs import active_processes
+            active_processes[job_id] = process
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            return {"status": "failed", "stdout": "", "stderr": f"Execution timed out after {timeout} seconds.", "exit_code": -1, "error_message": "Timeout expired"}
+
+        stdout = stdout_bytes.decode()
+        stderr = stderr_bytes.decode()
+
+        if process.returncode == 0:
+            return {
+                "status": "success",
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": 0
+            }
+        else:
+            error_msg = f"Snakemake workflow execution failed with exit code {process.returncode}"
+            return {
+                "status": "failed",
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": process.returncode,
+                "error_message": error_msg
+            }
+
     except Exception as e:
         error_msg = f"An unexpected error occurred: {str(e)}"
         logger.error(error_msg)

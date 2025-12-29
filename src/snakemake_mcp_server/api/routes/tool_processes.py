@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status, Request
-from ...jobs import run_snakemake_job_in_background, job_store
+from ...jobs import run_snakemake_job_in_background, job_store, active_processes
 from ...schemas import (
     Job,
     JobList,
@@ -118,6 +118,29 @@ async def get_job_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+@router.delete("/tool-processes/{job_id}", operation_id="cancel_tool_process")
+async def cancel_tool_process(job_id: str):
+    """
+    Cancel a running Snakemake tool process.
+    """
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status not in [JobStatus.ACCEPTED, JobStatus.RUNNING]:
+        raise HTTPException(status_code=400, detail=f"Cannot cancel job in {job.status} status")
+    
+    process = active_processes.get(job_id)
+    if process:
+        logger.info(f"Terminating tool process for job {job_id}")
+        process.terminate()
+        return {"message": "Cancellation request submitted"}
+    else:
+        # If it's in ACCEPTED but no process yet, just mark as failed
+        job.status = JobStatus.FAILED
+        job.result = {"status": "failed", "error_message": "Cancelled before execution started"}
+        return {"message": "Job cancelled before starting"}
 
 @router.get("/tool-processes/", response_model=JobList, operation_id="get_all_tool_processes")
 async def get_all_jobs():

@@ -3,10 +3,13 @@ import asyncio
 from pathlib import Path
 from .wrapper_runner import run_wrapper
 from .schemas import JobStatus, InternalWrapperRequest
-from typing import Callable, Coroutine, Dict, Any
+from typing import Callable, Coroutine, Dict, Any, Optional
 
 # In-memory store for jobs
 job_store = {}
+
+# In-memory store for active subprocesses
+active_processes: Dict[str, asyncio.subprocess.Process] = {}
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,9 @@ async def run_and_update_job(job_id: str, task: Callable[[], Coroutine[Any, Any,
         if result.get("status") == "success":
             job_store[job_id].status = JobStatus.COMPLETED
         else:
+            # Handle user cancellation specifically if possible
+            if result.get("exit_code") == -15: # SIGTERM
+                 job_store[job_id].error_message = "Job was cancelled by user."
             job_store[job_id].status = JobStatus.FAILED
         
         logger.info(f"Background job {job_id} finished with status: {job_store[job_id].status}")
@@ -37,6 +43,10 @@ async def run_and_update_job(job_id: str, task: Callable[[], Coroutine[Any, Any,
             "exit_code": -1,
             "error_message": "Job execution failed with an unexpected exception."
         }
+    finally:
+        # Always remove from active_processes when finished
+        if job_id in active_processes:
+            del active_processes[job_id]
 
 
 async def run_snakemake_job_in_background(job_id: str, request: InternalWrapperRequest, wrappers_path: str):
@@ -47,7 +57,7 @@ async def run_snakemake_job_in_background(job_id: str, request: InternalWrapperR
 
     # The actual task is to run the wrapper
     async def task():
-        result = await run_wrapper(request=request)
+        result = await run_wrapper(request=request, job_id=job_id)
         
         # Post-process to add output file paths to result
         output_file_paths = []

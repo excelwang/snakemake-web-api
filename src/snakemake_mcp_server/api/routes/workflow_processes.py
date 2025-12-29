@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status, Request
 from ...workflow_runner import run_workflow
 from ...schemas import UserWorkflowRequest, Job, JobList, JobStatus, JobSubmissionResponse
-from ...jobs import job_store, run_and_update_job
+from ...jobs import job_store, run_and_update_job, active_processes
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -15,25 +15,16 @@ async def run_workflow_in_background(job_id: str, request: UserWorkflowRequest, 
     A wrapper function to run the synchronous 'run_workflow' function in the background
     and update the job store with the result.
     """
-    loop = asyncio.get_event_loop()
-
-    def sync_task():
-        # This is the synchronous function that executes the subprocess
-        return run_workflow(
-            workflow_id=request.workflow_id,
-            workflows_dir=workflows_dir,
-            config_overrides=request.config,
-            target_rule=request.target_rule,
-            cores=request.cores,
-            use_conda=request.use_conda,
-        )
-
-    async def async_task():
-        # Run the synchronous task in an executor to avoid blocking the event loop
-        return await loop.run_in_executor(None, sync_task)
-
-    # run_and_update_job expects an awaitable, so we pass it the async wrapper
-    await run_and_update_job(job_id, async_task)
+    # Now that run_workflow is async, we can call it directly
+    await run_and_update_job(job_id, lambda: run_workflow(
+        workflow_id=request.workflow_id,
+        workflows_dir=workflows_dir,
+        config_overrides=request.config,
+        target_rule=request.target_rule,
+        cores=request.cores,
+        use_conda=request.use_conda,
+        job_id=job_id
+    ))
 
 
 @router.post(
@@ -78,6 +69,30 @@ async def get_workflow_process_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@router.delete("/workflow-processes/{job_id}", operation_id="cancel_workflow_process")
+async def cancel_workflow_process(job_id: str):
+    """
+    Cancel a running Snakemake workflow process.
+    """
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status not in [JobStatus.ACCEPTED, JobStatus.RUNNING]:
+        raise HTTPException(status_code=400, detail=f"Cannot cancel job in {job.status} status")
+    
+    process = active_processes.get(job_id)
+    if process:
+        logger.info(f"Terminating workflow process for job {job_id}")
+        process.terminate()
+        return {"message": "Cancellation request submitted"}
+    else:
+        # If it's in ACCEPTED but no process yet, just mark as failed
+        job.status = JobStatus.FAILED
+        job.result = {"status": "failed", "error_message": "Cancelled before execution started"}
+        return {"message": "Job cancelled before starting"}
 
 
 @router.get("/workflow-processes", response_model=JobList, operation_id="get_all_workflow_processes")

@@ -5,13 +5,17 @@ import pytest
 from fastapi.testclient import TestClient
 import logging
 import json
+import os
 from pathlib import Path
 from snakemake_mcp_server.api.main import create_native_fastapi_app
 
 @pytest.fixture
 def rest_client():
     """Create a TestClient for the FastAPI application."""
-    snakebase_dir = Path("/root/snakemake-mcp-server/snakebase").resolve()
+    snakebase_dir_env = os.environ.get("SNAKEBASE_DIR")
+    if not snakebase_dir_env:
+        pytest.fail("SNAKEBASE_DIR environment variable not set.")
+    snakebase_dir = Path(snakebase_dir_env).resolve()
     wrappers_path = str(snakebase_dir / "snakemake-wrappers")
     workflows_dir = str(snakebase_dir / "snakemake-workflows")
     

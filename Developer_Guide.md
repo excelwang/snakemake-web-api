@@ -50,6 +50,16 @@
 ## 测试策略
    * conftest.py 和共享 fixture（http_client、test_files、wrappers_path、workflows_dir）的解释。
    * 为什么 fixture 是 function 作用域以实现隔离。
+   * 如何运行测试用例：
+     1. 首先设置 `SNAKEBASE_DIR` 环境变量，指向包含 `snakemake-wrappers` 和 `snakemake-workflows` 的目录。
+     2. 运行 `swa parse` 以生成元数据缓存。
+     3. 使用 `pytest` 运行测试。
+     
+     ```bash
+     export SNAKEBASE_DIR=/path/to/your/snakebase
+     uv run swa parse
+     uv run pytest
+     ```
    * 如何为 wrapper 和工作流添加新测试。
    * SNAKEMAKE_WRAPPERS_PATH 环境变量对测试的重要性。
    * test_conda_env.py 和 test_shadow_wrapper.py 如何专门测试参数传递和 Snakemake 指令生成。

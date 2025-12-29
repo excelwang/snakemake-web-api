@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import os
 from fastapi.testclient import TestClient
 from snakemake_mcp_server.api.main import create_native_fastapi_app
 import tempfile
@@ -11,9 +12,11 @@ from snakemake_mcp_server.schemas import UserWrapperRequest, InternalWrapperRequ
 
 @pytest.fixture
 def rest_client():
-    """Create a TestClient for the FastAPI application directly."""
-    # Use absolute paths for the test environment
-    snakebase_dir = Path("/root/snakemake-mcp-server/snakebase").resolve()
+    """Create a TestClient for the FastAPI application."""
+    snakebase_dir_env = os.environ.get("SNAKEBASE_DIR")
+    if not snakebase_dir_env:
+        pytest.fail("SNAKEBASE_DIR environment variable not set.")
+    snakebase_dir = Path(snakebase_dir_env).resolve()
     wrappers_path = str(snakebase_dir / "snakemake-wrappers")
     workflows_dir = str(snakebase_dir / "snakemake-workflows")
     

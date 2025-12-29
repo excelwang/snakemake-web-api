@@ -4,7 +4,22 @@ import shutil
 import tempfile
 from pathlib import Path
 
-SNAKEBASE_DIR = "/root/snakemake-mcp-server/snakebase"
+import os
+import json
+from pathlib import Path
+from snakemake_mcp_server.wrapper_runner import run_wrapper
+from snakemake_mcp_server.schemas import UserWrapperRequest, PlatformRunParams
+
+SNAKEBASE_DIR_ENV = os.environ.get("SNAKEBASE_DIR")
+if not SNAKEBASE_DIR_ENV:
+    # We can't use pytest.fail here as it's top-level, 
+    # but the tests will fail later if this is missing.
+    # Alternatively, use a dummy path.
+    SNAKEBASE_DIR = Path("/tmp/missing_snakebase")
+else:
+    SNAKEBASE_DIR = Path(SNAKEBASE_DIR_ENV).resolve()
+
+WRAPPERS_PATH = SNAKEBASE_DIR / "snakemake-wrappers"
 
 @pytest.fixture
 def temp_dir():

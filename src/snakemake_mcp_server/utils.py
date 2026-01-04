@@ -39,53 +39,6 @@ def setup_demo_workdir(demo_workdir: str, workdir: str):
         logger.error(f"Failed to copy demo directory {demo_path} to {dest_path}: {e}")
         raise
 
-
-def prepare_isolated_workdir(source_dir: str, execution_dir: str):
-    """
-    Creates an isolated environment by recreating the directory structure.
-    Small files (source code, configs) are copied.
-    Data directories are STERNLY EXCLUDED to prevent Snakemake from using the 'fs' storage plugin.
-    """
-    source_path = Path(source_dir)
-    exec_path = Path(execution_dir)
-    exec_path.mkdir(parents=True, exist_ok=True)
-
-    logger.debug(f"Isolating workflow: recreating structure and preparing files {source_path} -> {exec_path}")
-    
-    # Strictly exclude all data and metadata directories
-    ignored = {".snakemake", ".git", "__pycache__", "inputs", "data", "samples", "results", "temp", "storage"}
-
-    for root, dirs, files in os.walk(source_path):
-        # Skip ignored directories
-        dirs[:] = [d for d in dirs if d not in ignored]
-        
-        # Calculate relative path from source root
-        rel_root = Path(root).relative_to(source_path)
-        dest_root = exec_path / rel_root
-        
-        # Ensure the destination directory exists
-        dest_root.mkdir(parents=True, exist_ok=True)
-        
-        for file in files:
-            source_file = Path(root) / file
-            dest_file = dest_root / file
-            
-            if not dest_file.exists():
-                try:
-                    # STRICT RULE: NO SYMLINKS. Only copy code/config files.
-                    # This prevents Snakemake from loading the 'fs' plugin in pods.
-                    if source_file.stat().st_size < 1024 * 1024:
-                        if not source_file.is_symlink():
-                            shutil.copy2(source_file, dest_file)
-                            logger.debug(f"Copied source file: {rel_root}/{file}")
-                        else:
-                            # If it's a symlink in source, copy its target content if it's small
-                            shutil.copy2(source_file.resolve(), dest_file)
-                            logger.debug(f"Copied symlink target: {rel_root}/{file}")
-                except Exception as e:
-                    logger.error(f"Failed to process {source_file}: {e}")
-
-
 async def sync_workdir_to_s3(workdir: str, s3_prefix: str):
     """
     Syncs the local execution directory to S3 using boto3.

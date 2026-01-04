@@ -12,7 +12,6 @@ from fastapi.responses import FileResponse
 from ...workflow_runner import run_workflow
 from ...schemas import UserWorkflowRequest, Job, JobList, JobStatus, JobSubmissionResponse
 from ...jobs import job_store, run_and_update_job, active_processes
-from ...utils import prepare_isolated_workdir
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

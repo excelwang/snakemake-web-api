@@ -108,7 +108,13 @@ async def run_workflow(
                     prefix_val = profile_config.get("default-storage-prefix") or profile_config.get("default_storage_prefix")
 
                     if (provider == "s3") or (prefix_val and prefix_val.startswith("s3://")):
-                        dynamic_prefix = f"{prefix_val.rstrip('/')}/swa-jobs/{job_id or 'anonymous'}/"
+                        base_prefix = prefix_val.rstrip('/')
+                        # Prevent prefix accumulation: if '/swa-jobs/' is already in the prefix, 
+                        # truncate everything from that point onwards to find the true base.
+                        if "/swa-jobs/" in base_prefix:
+                            base_prefix = base_prefix.split("/swa-jobs/")[0]
+                            
+                        dynamic_prefix = f"{base_prefix}/swa-jobs/{job_id or 'anonymous'}/"
                         
                         # Sync data to S3 if requested (prefill)
                         if prefill:

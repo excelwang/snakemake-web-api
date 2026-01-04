@@ -2,6 +2,7 @@ import asyncio
 import tempfile
 import os
 import logging
+import shutil
 from pathlib import Path
 from typing import Dict, Optional, Union
 import yaml
@@ -36,56 +37,34 @@ async def run_workflow(
     prefill: bool = False,
 ) -> Dict:
     """
-    Executes a Snakemake workflow by merging a config object with the base
-    config.yaml and running Snakemake via asyncio.create_subprocess_exec.
-    Outputs are redirected to a log file for real-time access.
-    If 'workdir' is provided, execution happens there for isolation.
-    Support for 'workflow_profile' allows K8s/S3 execution.
-    'prefill' enables automatic S3 data provisioning.
+    Executes a Snakemake workflow in-place.
+    Minimal interference with command line to ensure compatibility.
     """
-    temp_config_path = None
     log_file_path = None
     try:
-        if not workflow_id or not isinstance(workflow_id, str):
+        if not workflow_id:
             raise ValueError("workflow_id must be a non-empty string")
 
         workflow_base_path = Path(workflows_dir)
         workflow_source_path = (workflow_base_path / workflow_id).resolve()
-        if not workflow_source_path.exists():
-            raise FileNotFoundError(f"Workflow not found at: {workflow_source_path}")
         
-        # Determine the execution directory
-        execution_path = Path(workdir).resolve() if workdir else workflow_source_path
-        execution_path.mkdir(parents=True, exist_ok=True)
-
-        # Locate the Snakefile (it should be in the execution path now due to isolation setup)
-        main_snakefile = execution_path / "workflow" / "Snakefile"
-        if not main_snakefile.exists():
-            main_snakefile_root = execution_path / "Snakefile"
-            if not main_snakefile_root.exists():
-                raise FileNotFoundError(f"Main Snakefile not found in execution path: {execution_path}")
-            main_snakefile = main_snakefile_root
-
-        # Load base config from the original source to ensure we have the defaults
+        # execution_path is the original source path for in-place run
+        execution_path = workflow_source_path
+        
+        # Merge config and overwrite original config/config.yaml (temporary)
         original_config_path = workflow_source_path / "config" / "config.yaml"
-        if not original_config_path.exists():
-            logger.warning(f"Original config.yaml not found for workflow at: {original_config_path}. Starting with an empty config.")
-            base_config = {}
-        else:
+        base_config = {}
+        if original_config_path.exists():
             with open(original_config_path, 'r') as f:
                 base_config = yaml.safe_load(f) or {}
-        
-        # Deep merge the user's config overrides into the base config
         merged_config = deep_merge(config_overrides, base_config)
 
-        # Write the temporary config file into the execution directory
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False, dir=execution_path) as tmp_config_file:
-            yaml.dump(merged_config, tmp_config_file)
-            temp_config_path = Path(tmp_config_file.name)
-        
-        logger.debug(f"Generated temporary config for run: {temp_config_path}")
+        # Ensure config dir exists
+        (execution_path / "config").mkdir(parents=True, exist_ok=True)
+        with open(execution_path / "config" / "config.yaml", 'w') as f:
+            yaml.dump(merged_config, f)
 
-        # Setup real-time logging to file
+        # Setup logging
         if job_id:
             log_dir = Path.home() / ".swa" / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
@@ -94,73 +73,60 @@ async def run_workflow(
         else:
             log_file = None
 
-        # Build a simple, robust Snakemake command
+        # Build MINIMAL command
         command = [
             "snakemake", 
-            "--snakefile", str(main_snakefile),
-            "--configfile", str(temp_config_path),
             "--cores", str(cores),
             "--nocolor",
             "--printshellcmds",
         ]
 
         if workflow_profile:
-            # 1. Search priority for the profile
-            local_profile_path = execution_path / "workflow" / "profiles" / workflow_profile
-            global_swa_profile_path = Path.home() / ".swa" / "profiles" / workflow_profile
-            
-            actual_profile_path = None
-            if local_profile_path.exists():
-                actual_profile_path = local_profile_path
-            elif global_swa_profile_path.exists():
-                actual_profile_path = global_swa_profile_path
-            
-            # 2. Add profile to command
-            if actual_profile_path:
-                command.extend(["--workflow-profile", str(actual_profile_path)])
-            else:
-                command.extend(["--workflow-profile", workflow_profile])
+            # Handle profile modification for dynamic prefix
+            # Priority: workflow-specific profile
+            profile_path = execution_path / "workflow" / "profiles" / workflow_profile
+            if not profile_path.exists():
+                # Fallback to global profile
+                global_profile = Path.home() / ".swa" / "profiles" / workflow_profile
+                if global_profile.exists():
+                    # Copy to local so Snakemake can see it in worker pods
+                    dest = execution_path / "workflow" / "profiles" / workflow_profile
+                    dest.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(global_profile, dest, dirs_exist_ok=True)
+                    profile_path = dest
 
-            # 3. Handle dynamic S3 prefix and pre-provisioning based on profile config
-            if actual_profile_path and (actual_profile_path / "config.yaml").exists():
+            command.extend(["--profile", str(profile_path.relative_to(execution_path)) if profile_path.is_relative_to(execution_path) else workflow_profile])
+
+            # Update profile config.yaml with dynamic prefix
+            config_file = profile_path / "config.yaml"
+            if config_file.exists():
                 try:
-                    with open(actual_profile_path / "config.yaml", 'r') as f:
+                    with open(config_file, 'r') as f:
                         profile_config = yaml.safe_load(f) or {}
                     
-                    common_prefix = profile_config.get("default-storage-provider") == "s3" and profile_config.get("default-storage-prefix")
-                    if not common_prefix: # Fallback: check if s3 is in the prefix string anyway
-                        prefix_val = profile_config.get("default-storage-prefix", "")
-                        if prefix_val.startswith("s3://"):
-                            common_prefix = prefix_val
+                    provider = profile_config.get("default-storage-provider") or profile_config.get("default_storage_provider")
+                    prefix_val = profile_config.get("default-storage-prefix") or profile_config.get("default_storage_prefix")
 
-                    if common_prefix:
-                        # Construct dynamic prefix: base_prefix/swa-jobs/{job_id}/
-                        base_prefix = common_prefix.rstrip('/')
-                        dynamic_prefix = f"{base_prefix}/swa-jobs/{job_id or 'anonymous'}/"
+                    if (provider == "s3") or (prefix_val and prefix_val.startswith("s3://")):
+                        dynamic_prefix = f"{prefix_val.rstrip('/')}/swa-jobs/{job_id or 'anonymous'}/"
                         
-                        # Pre-provisioning: upload current workdir to S3 ONLY IF prefill is enabled
-                        if prefill and workdir:
+                        # Sync data to S3 if requested (prefill)
+                        if prefill:
                             await sync_workdir_to_s3(str(execution_path), dynamic_prefix)
                         
-                        # Override the storage prefix from the profile
-                        command.extend(["--default-storage-prefix", dynamic_prefix])
-                        logger.info(f"Using dynamic S3 prefix: {dynamic_prefix} (Prefill: {prefill})")
+                        profile_config["default-storage-prefix"] = dynamic_prefix
+                        if not provider: profile_config["default-storage-provider"] = "s3"
+                        
+                        with open(config_file, 'w') as f:
+                            yaml.dump(profile_config, f)
+                        logger.info(f"Using dynamic S3 prefix: {dynamic_prefix}")
                 except Exception as e:
-                    logger.error(f"Failed to parse profile config for prefix extraction: {e}")
+                    logger.error(f"Failed to update profile for in-place run: {e}")
 
-        if use_conda:
-            command.append("--use-conda")
-            # Use a global conda prefix to share environments across isolated runs
-            conda_prefix = os.environ.get("SNAKEMAKE_CONDA_PREFIX", os.path.expanduser("~/.snakemake/conda"))
-            command.extend(["--conda-prefix", conda_prefix])
-        
-        if use_cache:
-            command.append("--cache")
-        
         if target_rule:
             command.append(target_rule)
 
-        logger.info(f"Executing command: {' '.join(command)} in {execution_path}")
+        logger.info(f"Executing IN-PLACE command: {' '.join(command)} in {execution_path}")
         
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -169,14 +135,12 @@ async def run_workflow(
             cwd=execution_path
         )
 
-        # Register process for potential cancellation
         if job_id:
             from .jobs import active_processes
             active_processes[job_id] = process
 
         try:
             if log_file:
-                # If logging to file, we just wait for the process to exit
                 await asyncio.wait_for(process.wait(), timeout=timeout)
                 stdout = f"Logs redirected to {log_file_path}"
                 stderr = ""
@@ -187,43 +151,13 @@ async def run_workflow(
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
-            return {"status": "failed", "stdout": "", "stderr": f"Execution timed out after {timeout} seconds.", "exit_code": -1, "error_message": "Timeout expired"}
+            return {"status": "failed", "stdout": "", "stderr": "Timeout", "exit_code": -1}
         finally:
             if log_file:
                 log_file.close()
 
-        if process.returncode == 0:
-            return {
-                "status": "success",
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": 0
-            }
-        else:
-            error_msg = f"Snakemake workflow execution failed with exit code {process.returncode}"
-            return {
-                "status": "failed",
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": process.returncode,
-                "error_message": error_msg
-            }
+        return {"status": "success" if process.returncode == 0 else "failed", "stdout": stdout, "stderr": stderr, "exit_code": process.returncode}
 
     except Exception as e:
-        error_msg = f"An unexpected error occurred: {str(e)}"
-        logger.error(error_msg)
-        return {
-            "status": "failed",
-            "stdout": "",
-            "stderr": str(e),
-            "exit_code": -1,
-            "error_message": error_msg
-        }
-    
-    finally:
-        if temp_config_path and temp_config_path.exists():
-            try:
-                os.remove(temp_config_path)
-                logger.debug(f"Removed temporary config file: {temp_config_path}")
-            except Exception as e:
-                logger.warning(f"Failed to remove temporary config file {temp_config_path}: {e}")
+        logger.error(f"In-place run failed: {e}")
+        return {"status": "failed", "stdout": "", "stderr": str(e), "exit_code": -1}

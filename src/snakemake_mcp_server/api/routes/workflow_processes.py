@@ -19,23 +19,11 @@ router = APIRouter()
 
 async def run_workflow_in_background(job_id: str, request: UserWorkflowRequest, workflows_dir: str, workflow_profile: Optional[str] = None, prefill: bool = False):
     """
-    Sets up an isolated execution environment and runs the workflow.
+    Runs the workflow in-place within its source directory.
+    Isolation is achieved via dynamic S3 prefixes for data.
     """
-    # 1. Create a unique execution directory
-    temp_dir = tempfile.mkdtemp()
-    execution_workdir = str(Path(temp_dir).resolve())
+    execution_workdir = str((Path(workflows_dir) / request.workflow_id).resolve())
     
-    # 2. Link source files into the execution directory
-    workflow_source_dir = str((Path(workflows_dir) / request.workflow_id).resolve())
-    try:
-        prepare_isolated_workdir(workflow_source_dir, execution_workdir)
-    except Exception as e:
-        logger.error(f"Failed to prepare isolated workdir: {e}")
-        job_store[job_id].status = JobStatus.FAILED
-        job_store[job_id].result = {"status": "failed", "error_message": f"Isolation failed: {str(e)}"}
-        return
-
-    # 3. Run the workflow in the isolated directory
     async def task():
         try:
             result = await run_workflow(
@@ -53,7 +41,7 @@ async def run_workflow_in_background(job_id: str, request: UserWorkflowRequest, 
             )
             return result
         finally:
-            logger.debug(f"Execution finished. Isolated workdir: {execution_workdir}")
+            logger.debug(f"Execution finished. Workdir: {execution_workdir}")
 
     await run_and_update_job(job_id, task)
 

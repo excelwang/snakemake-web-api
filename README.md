@@ -70,7 +70,7 @@ The `snakebase` directory must contain the following subdirectories:
     ```bash
     mkdir snakemake-workflows
     cd snakemake-workflows
-    git clone https://github.com/snakemake-workflows/rna-seq-star-deseq2
+    git clone https://github.com/excelwang/rna-seq-star-deseq2
     git clone https://github.com/snakemake-workflows/dna-seq-varlociraptor
     git clone https://github.com/excelwang/StainedGlass
     # etc.

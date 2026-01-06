@@ -223,40 +223,67 @@ To run workflows on Kubernetes with S3 storage, create a directory `~/.swa/profi
 ```yaml
 # ~/.swa/profiles/k3s-s3/config.yaml
 
-# 1. Execution Strategy
+# 1. 使用 K3s (Kubernetes) 执行器
 executor: kubernetes
-jobs: 100
+jobs: 10
 
-# 2. Remote Storage (S3/MinIO)
+# 2. 设置默认的 S3 存储提供商
 default-storage-provider: s3
-default-storage-prefix: s3://my-bucket/snakemake-runs/
+default-storage-prefix: s3://whj/
 
-# 3. Environment Forwarding
+# 3. 将 S3/MinIO 凭证和服务器地址注入到 K3s Pods 中
 envvars:
   - AWS_ACCESS_KEY_ID
   - AWS_SECRET_ACCESS_KEY
   - AWS_ENDPOINT_URL
 
-# 4. Container & Software
+# 4. 使用 Conda 环境
 use-conda: true
-# Recommended: Use a custom image with snakemake-storage-plugin-s3 pre-installed
-container-image: my-registry/snakemake-s3:latest 
+conda-frontend: mamba
 
-# 5. Advanced Kubernetes Settings
-kubernetes-namespace: default
-# Recommended for debugging: keeps pods/jobs after failure so you can inspect logs
-kubernetes-omit-job-cleanup: true
-# Optional: Use a custom service account
-# kubernetes-service-account-name: snakemake-sa
-
-# 6. Global Stability Settings
-# Use global retries to handle transient failures in K8s pods
-retries: 3
-
-# 7. Runtime Tweaks
-latency-wait: 60
+# 5. 其他配置
+latency-wait: 120
 rerun-incomplete: true
+rerun-triggers: mtime
+show-failed-logs: false
 printshellcmds: true
+keep-going: false
+
+# 6. Kubernetes Pod 配置
+container-image: snakemake/snakemake:v9.11.2
+storage-s3-endpoint-url: http://10.3.217.200:20480
+storage-s3-max-requests-per-second: 100
+kubernetes-namespace: default
+# 保持 pod 以便调试 (生产环境可设为 false)
+kubernetes-omit-job-cleanup: true
+
+# 7. 全局稳定性设置
+# 增加重试次数以应对集群 API 波动
+retries: 10
+
+# 8. 使用自定义 Kubernetes Job 模板以设置 backoffLimit
+# 这能极大地提高在高负载 K8s 环境下的运行成功率
+kubernetes-job-template: job-template.yaml
+```
+
+#### Configuring `job-template.yaml`
+
+To enable automatic retries at the Kubernetes Job level, you must provide a template file named `job-template.yaml` inside the same profile directory (e.g., `~/.swa/profiles/k3s-s3/job-template.yaml`).
+
+Create the file with the following content:
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: snakejob-
+spec:
+  template:
+    spec:
+      containers:
+      - name: snakemake
+  # This allows the Pod to retry within the same Job before failing
+  backoffLimit: 3
 ```
 
 ### 6. Monitor Workflow Progress
